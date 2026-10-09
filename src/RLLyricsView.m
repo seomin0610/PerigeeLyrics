@@ -784,6 +784,9 @@ static RLLyricsView *gCache;
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+	// TIDAL's SwiftUI controls aren't UIViews above us, so only claim touches between the mask's fades
+	CGFloat h = self.bounds.size.height;
+	if (point.y < [_fade.locations[1] doubleValue] * h || point.y > [_fade.locations[2] doubleValue] * h) return nil;
 	UIView *hit = [super hitTest:point withEvent:event];
 	if (!hit || _scroll.isDecelerating) return hit;
 	CGPoint p = [self convertPoint:point toView:_scroll];
