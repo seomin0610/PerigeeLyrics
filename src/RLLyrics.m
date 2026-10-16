@@ -1,5 +1,6 @@
 #import "RL.h"
 #import <os/log.h>
+#import <CommonCrypto/CommonDigest.h>
 
 @implementation RLSyl
 @end
@@ -165,6 +166,42 @@ static NSCache *gLyricsCache;
 
 void RLClearCache(void) { [gLyricsCache removeAllObjects]; }
 
+static const NSUInteger kRLDiskMax = 1000;
+
+static void RLPruneDisk(NSString *dir) {
+	NSFileManager *fm = NSFileManager.defaultManager;
+	NSArray<NSURL *> *files = [fm contentsOfDirectoryAtURL:[NSURL fileURLWithPath:dir] includingPropertiesForKeys:@[ NSURLContentModificationDateKey ] options:0 error:nil];
+	if (files.count <= kRLDiskMax) return;
+	NSDate *(^date)(NSURL *) = ^NSDate *(NSURL *u) { NSDate *d; [u getResourceValue:&d forKey:NSURLContentModificationDateKey error:nil]; return d ?: NSDate.distantPast; };
+	files = [files sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) { return [date(b) compare:date(a)]; }];
+	for (NSURL *u in [files subarrayWithRange:NSMakeRange(kRLDiskMax, files.count - kRLDiskMax)]) [fm removeItemAtURL:u error:nil];
+}
+
+static NSString *RLDiskPath(NSString *key) {
+	static NSString *dir;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"RadiantTidal"];
+		[NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+		RLPruneDisk(dir);
+	});
+	NSData *k = [key dataUsingEncoding:NSUTF8StringEncoding];
+	unsigned char h[CC_SHA256_DIGEST_LENGTH];
+	CC_SHA256(k.bytes, (CC_LONG)k.length, h);
+	NSMutableString *name = [NSMutableString string];
+	for (int i = 0; i < 16; i++) [name appendFormat:@"%02x", h[i]];
+	return [[dir stringByAppendingPathComponent:name] stringByAppendingPathExtension:@"json"];
+}
+
+static NSArray<RLLine *> *RLFromDisk(NSString *path, BOOL romanize) {
+	NSData *d = [NSData dataWithContentsOfFile:path];
+	NSArray *lines = d ? RLParse(RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class), romanize) : nil;
+	if (!lines.count) return nil;
+	[NSFileManager.defaultManager setAttributes:@{ NSFileModificationDate: NSDate.date } ofItemAtPath:path error:nil];
+	RLLog(@"%lu lines from disk cache", (unsigned long)lines.count);
+	return lines;
+}
+
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void (^done)(NSArray<RLLine *> *lines)) {
 	static dispatch_queue_t queue;
 	static dispatch_once_t once;
@@ -176,11 +213,14 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 	NSString *key = [NSString stringWithFormat:@"%@\n%@\n%d%d", title, artist, romanize, synth];
 
 	dispatch_async(queue, ^{
-		id hit = flush ? nil : [gLyricsCache objectForKey:key];
+		NSString *path = RLDiskPath(key);
+		id hit = flush ? nil : [gLyricsCache objectForKey:key] ?: RLFromDisk(path, romanize);
 		if (hit) {
+			[gLyricsCache setObject:hit forKey:key];
 			dispatch_async(dispatch_get_main_queue(), ^{ done(hit == NSNull.null ? nil : hit); });
 			return;
 		}
+		if (flush) [NSFileManager.defaultManager removeItemAtPath:path error:nil];
 		NSDictionary *auth = @{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam" };
 
 		NSString *cleanTitle = RLReplace(RLReplace(title, @"\\s*[\\(\\[][^\\)\\]]*[\\)\\]]"), @"\\s+-\\s+.*$");
@@ -188,6 +228,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 		NSOrderedSet *cands = [NSOrderedSet orderedSetWithArray:@[ @[title, artist], @[cleanTitle, artist], @[cleanTitle, firstArtist] ]];
 
 		NSArray *result;
+		NSData *body;
 		for (NSArray *c in cands) {
 			if (![c[0] length] || ![c[1] length]) continue;
 			NSString *qs = [NSString stringWithFormat:@"?title=%@&artist=%@%@%@%@%@&platform=rl", RLEnc(c[0]), RLEnc(c[1]),
@@ -205,6 +246,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 				NSString *note = RLAs(json[@"_flush"], NSString.class);
 				if (note.length) RLLog(@"flush: %@", note);
 				result = RLParse(json, romanize);
+				if (result.count) body = d;
 				notFound = !result.count;
 				break;
 			}
@@ -215,6 +257,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 			}
 		}
 		[gLyricsCache setObject:result.count ? result : NSNull.null forKey:key];
+		[body writeToFile:path atomically:YES];
 		dispatch_async(dispatch_get_main_queue(), ^{ done(result.count ? result : nil); });
 	});
 }
