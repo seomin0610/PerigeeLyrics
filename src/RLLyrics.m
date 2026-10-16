@@ -1,6 +1,7 @@
 #import "RL.h"
 #import <os/log.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/runtime.h>
 
 @implementation RLSyl
 @end
@@ -126,8 +127,11 @@ NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize) {
 			line.tr = RLWords(RLCollapse(trText), line.start);
 		[lines addObject:line];
 	}];
+	if ([json[@"type"] isEqual:@"Word"] && [RLAs(json[@"_synthesized"], NSNumber.class) boolValue]) objc_setAssociatedObject(lines, @selector(RLIsAI:), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	return lines;
 }
+
+BOOL RLIsAI(NSArray<RLLine *> *lines) { return lines && [objc_getAssociatedObject(lines, @selector(RLIsAI:)) boolValue]; }
 
 #pragma mark - Network
 

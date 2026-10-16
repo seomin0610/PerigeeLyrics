@@ -45,6 +45,11 @@ static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	return [lang isEqualToString:@"en"] ? l.tr : l.mx[lang];
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
+BOOL RLIsAI(NSArray<RLLine *> *lines);
+void RLCoverTrack(NSString *title, NSString *artist, NSString *album, double duration);
+void RLCoverISRC(NSString *title, NSString *isrc, double duration);
+void RLCoverSync(UIView *player);
+void RLCoverSetting(void);
 
 @interface RLStore : NSObject
 + (instancetype)shared;

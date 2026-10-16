@@ -125,9 +125,11 @@ static NSURLSessionDataTask *hook_dataTask(NSURLSession *self, SEL _cmd, NSURLRe
 		if (err || RLTidalHasLyrics(data, resp)) {
 			RLLog(@"TIDAL lyrics for %@: %@", trackId, err ? err.localizedDescription : @"present");
 			done(data, resp, err);
+			if (!err && RLBool(@"animCover", YES)) RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) { RLCoverISRC(title, isrc, duration); });
 			return;
 		}
 		RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) {
+			RLCoverISRC(title, isrc, duration);
 			if (!title.length || !artist.length) { RLLog(@"no lyrics for %@, track info failed", trackId); done(data, resp, err); return; }
 			RLFetch(title, artist, isrc, duration, NO, ^(NSArray<RLLine *> *lines) {
 				NSData *fake = lines.count ? (relId ? RLRelationshipDocument(RLLyricsObject(lines, trackId), req.URL.path) : RLTrackDocument(data, RLLyricsObject(lines, trackId), trackId)) : nil;

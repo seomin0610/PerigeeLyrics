@@ -140,6 +140,7 @@ static void RLUntint(void);
 		self.title = title;
 		self.artist = artist;
 		[self refetch];
+		RLCoverTrack(title, artist, info[MPMediaItemPropertyAlbumTitle], _duration);
 	}
 	id art = info[MPMediaItemPropertyArtwork];
 	if (art && art != _artworkObj) {
@@ -304,6 +305,7 @@ void RLSettingsChanged(NSString *key) {
 	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"]) { [gLyricsView rebuild]; [RLStore.shared translate]; }
 	else if ([key isEqualToString:@"enabled"]) RLSync();
 	else if ([key isEqualToString:@"backdrop"]) RLSyncBackdrop();
+	else if ([key isEqualToString:@"animCover"]) { RLCoverSetting(); RLSyncBackdrop(); }
 	else if ([key isEqualToString:@"fadeTint"]) { RLUntint(); RLSyncBackdrop(); }
 	else if ([key isEqualToString:@"lang"]) {
 		UIButtonConfiguration *c = gSettingsButton.configuration;
@@ -386,7 +388,7 @@ static void RLUnhideContainers(void) {
 
 static void RLHideBackground(CALayer *layer, CALayer *root, CGRect bounds, int depth) {
 	for (CALayer *l in layer.sublayers) {
-		if ([l.delegate isKindOfClass:RLLyricsView.class] || [l.delegate isKindOfClass:UIScrollView.class]) continue;
+		if ([l.delegate isKindOfClass:RLLyricsView.class] || [l.delegate isKindOfClass:UIScrollView.class] || [l isKindOfClass:AVPlayerLayer.class]) continue;
 		if (l.sublayers.count) {
 			if (depth < 12) RLHideBackground(l, root, bounds, depth + 1);
 			continue;
@@ -513,7 +515,7 @@ static void hook_setBG(CALayer *self, SEL _cmd, CGColorRef c) {
 	orig_setBG(self, _cmd, c);
 	if (!gClearedView || !c || !pthread_main_np()) return;
 	if ([gHiddenFull containsObject:self]) { RLSetBgColor(c); return; }
-	if (gBgColor && !self.contents && !self.sublayers.count && CGColorGetAlpha(c) > 0.01 && RLSameRGB(c, gBgColor) && ![gHiddenBg containsObject:self]) RLHideNow(self, @"patch");
+	if (gBgColor && !self.contents && !self.sublayers.count && CGColorGetAlpha(c) > 0.01 && RLSameRGB(c, gBgColor) && ![gHiddenBg containsObject:self] && ![self.superlayer isKindOfClass:AVPlayerLayer.class]) RLHideNow(self, @"patch");
 }
 
 static void hook_setColors(CAGradientLayer *self, SEL _cmd, NSArray *colors) {
@@ -578,6 +580,7 @@ static RLBackdrop *RLMakeBackdrop(void) {
 
 static void RLSyncBackdrop(void) {
 	UIView *hv = gHost.viewIfLoaded;
+	RLCoverSync(hv.window ? hv : nil);
 	if (!hv.superview || !RLOnScreen(gHost) || !RLBool(@"backdrop", YES)) {
 		[gBackdrop removeFromSuperview];
 		RLRestoreBackground();
