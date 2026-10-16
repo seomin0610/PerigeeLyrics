@@ -159,14 +159,14 @@ static NSString *RLReplace(NSString *s, NSString *pattern) {
 	return [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 }
 
-// Same endpoints/token as radiant-lyrics-luna api.ts (the token is public by design)
+// Same endpoints/token as radiant-lyrics-luna api.ts (the token is public by design); its x-client-ip
+// (from api.ipify.org) is left out, the API answers without it.
 static NSCache *gLyricsCache;
 
 void RLClearCache(void) { [gLyricsCache removeAllObjects]; }
 
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void (^done)(NSArray<RLLine *> *lines)) {
 	static dispatch_queue_t queue;
-	static NSString *ip;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
 		queue = dispatch_queue_create("rl.fetch", DISPATCH_QUEUE_SERIAL);
@@ -181,12 +181,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 			dispatch_async(dispatch_get_main_queue(), ^{ done(hit == NSNull.null ? nil : hit); });
 			return;
 		}
-		if (!ip) {
-			NSData *d;
-			if (RLGet(@"https://api.ipify.org?format=text", nil, 4, &d) == 200)
-				ip = [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-		}
-		NSDictionary *auth = @{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam", @"x-client-ip": ip ?: @"null" };
+		NSDictionary *auth = @{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam" };
 
 		NSString *cleanTitle = RLReplace(RLReplace(title, @"\\s*[\\(\\[][^\\)\\]]*[\\)\\]]"), @"\\s+-\\s+.*$");
 		NSString *firstArtist = RLReplace(artist, @"\\s*(,|&|\\sfeat\\.?\\s|\\sft\\.?\\s|\\swith\\s).*$");
