@@ -82,6 +82,68 @@ static NSArray<NSArray<NSString *> *> *RLVibeFor(NSString *title, NSString *arti
 	return map;
 }
 
+static NSDictionary<NSNumber *, NSString *> *RLLrc(NSString *lrc) {
+	static NSRegularExpression *re;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ re = [NSRegularExpression regularExpressionWithPattern:@"^\\[(\\d+):(\\d+)(?:[.:](\\d+))?\\]" options:0 error:nil]; });
+	NSMutableDictionary *out = [NSMutableDictionary dictionary];
+	for (NSString *raw in [lrc componentsSeparatedByString:@"\n"]) {
+		NSString *line = raw;
+		NSMutableArray *times = [NSMutableArray array];
+		NSTextCheckingResult *m;
+		while ((m = [re firstMatchInString:line options:0 range:NSMakeRange(0, line.length)])) {
+			NSString *frac = [m rangeAtIndex:3].location == NSNotFound ? @"" : [line substringWithRange:[m rangeAtIndex:3]];
+			double t = [line substringWithRange:[m rangeAtIndex:1]].intValue * 60 + [line substringWithRange:[m rangeAtIndex:2]].intValue + (frac.length ? frac.doubleValue / pow(10, frac.length) : 0);
+			[times addObject:@(llround(t * 100))];
+			line = [line substringFromIndex:m.range.length];
+		}
+		NSString *text = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+		if (text.length) for (NSNumber *t in times) out[t] = text;
+	}
+	return out;
+}
+
+static NSString *RLTitleKey(NSString *s) {
+	static NSRegularExpression *re;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ re = [NSRegularExpression regularExpressionWithPattern:@"[\\(\\[（][^\\)\\]）]*[\\)\\]）]" options:0 error:nil]; });
+	return RLLineKey([re stringByReplacingMatchesInString:s ?: @"" options:0 range:NSMakeRange(0, s.length) withTemplate:@""]);
+}
+
+// NetEase's tlyric is Simplified Chinese, timed with the same tags as its lrc.
+static NSArray<NSArray<NSString *> *> *RLNetEaseFor(NSString *title, NSString *artist) {
+	NSDictionary *h = @{ @"Referer": @"https://music.163.com/", @"User-Agent": @"Mozilla/5.0" };
+	NSString *base = @"https://music.163.com/api/";
+	NSData *d;
+	if (RLGet([NSString stringWithFormat:@"%@search/get?type=1&limit=10&s=%@", base, RLEnc([NSString stringWithFormat:@"%@ %@", title, artist])], h, 8, &d) != 200) return nil;
+	id json = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+	NSArray *songs = RLAs(RLAs(RLAs(json, NSDictionary.class)[@"result"], NSDictionary.class)[@"songs"], NSArray.class);
+	NSString *full = RLLineKey(title), *core = RLTitleKey(title), *who = RLLineKey(artist);
+	NSNumber *sid;
+	NSInteger best = -1;
+	for (NSDictionary *s in songs) {
+		NSString *name = RLAs(RLAs(s, NSDictionary.class)[@"name"], NSString.class) ?: @"";
+		NSInteger score = [RLLineKey(name) isEqualToString:full] ? 4 : [RLTitleKey(name) isEqualToString:core] ? 2 : 0;
+		for (NSDictionary *a in RLAs(s[@"artists"], NSArray.class)) {
+			NSString *k = RLLineKey(RLAs(RLAs(a, NSDictionary.class)[@"name"], NSString.class) ?: @"");
+			if (k.length && who.length && ([who containsString:k] || [k containsString:who])) { score++; break; }
+		}
+		if (score > best && RLAs(s[@"id"], NSNumber.class)) best = score, sid = s[@"id"];
+	}
+	if (!sid) { RLLog(@"netease: no match for %@ — %@", title, artist); return @[]; }
+	if (RLGet([NSString stringWithFormat:@"%@song/lyric?id=%@&lv=1&tv=-1", base, sid], h, 8, &d) != 200) return nil;
+	json = d ? RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class) : nil;
+	NSDictionary *orig = RLLrc(RLAs(RLAs(json[@"lrc"], NSDictionary.class)[@"lyric"], NSString.class) ?: @"");
+	NSDictionary *zh = RLLrc(RLAs(RLAs(json[@"tlyric"], NSDictionary.class)[@"lyric"], NSString.class) ?: @"");
+	NSMutableArray *map = [NSMutableArray array];
+	for (NSNumber *t in [orig.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+		NSString *from = orig[t], *to = zh[t];
+		if (RLLineKey(from).length && RLLineKey(to ?: @"").length && ![RLLineKey(to) isEqualToString:RLLineKey(from)]) [map addObject:@[ RLLineKey(from), to ]];
+	}
+	RLLog(@"netease: %lu zh lines for %@ — %@ (%@)", (unsigned long)map.count, title, artist, sid);
+	return map;
+}
+
 static NSUInteger RLLev(NSString *a, NSString *b) {
 	NSUInteger n = b.length, prev[n + 1], cur[n + 1];
 	for (NSUInteger j = 0; j <= n; j++) prev[j] = j;
@@ -125,10 +187,11 @@ void RLTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NS
 		NSMutableArray *found = [NSMutableArray array];
 		for (NSUInteger i = 0; i < lines.count; i++) [found addObject:NSNull.null];
 		BOOL any = NO;
-		for (NSString *source in [lang isEqualToString:@"ko"] ? @[ @"vibe", @"musixmatch" ] : @[ @"musixmatch" ]) {
+		NSArray *sources = [lang isEqualToString:@"ko"] ? @[ @"vibe", @"musixmatch" ] : [lang isEqualToString:@"zh"] ? @[ @"netease", @"musixmatch" ] : @[ @"musixmatch" ];
+		for (NSString *source in sources) {
 			if (![found containsObject:NSNull.null]) break;
 			NSString *key = [NSString stringWithFormat:@"%@\n%@\n%@\n%@", source, title, artist, lang];
-			NSArray *map = [cache objectForKey:key] ?: ([source isEqualToString:@"vibe"] ? RLVibeFor(title, artist) : RLMusixmatchFor(title, artist, lang));
+			NSArray *map = [cache objectForKey:key] ?: [source isEqualToString:@"vibe"] ? RLVibeFor(title, artist) : [source isEqualToString:@"netease"] ? RLNetEaseFor(title, artist) : RLMusixmatchFor(title, artist, lang);
 			if (!map) continue;
 			[cache setObject:map forKey:key];
 			for (NSUInteger i = 0; i < lines.count && map.count; i++) {
