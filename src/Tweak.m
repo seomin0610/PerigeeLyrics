@@ -162,7 +162,7 @@ static void RLUntint(void);
 		if (fid != self->_fetchId) return;
 		self.lines = lines;
 		self.status = lines ? RLStatusOK : RLStatusMissing;
-		RLLog(@"%lu lines for %@ — %@", (unsigned long)lines.count, self.title, self.artist);
+		RLLog(@"%lu lines for %@ — %@ (%@)", (unsigned long)lines.count, self.title, self.artist, RLSourceName(lines));
 		[gLyricsView reload];
 		RLSync();
 		[self translate];
@@ -301,6 +301,7 @@ void RLReplay(void) {
 
 void RLSettingsChanged(NSString *key) {
 	if ([key isEqualToString:@"romanize"] || [key isEqualToString:@"synth"]) [RLStore.shared refetch];
+	else if ([key isEqualToString:@"spicyKey"]) [RLStore.shared refetch:YES];
 	else if ([key isEqualToString:@"fontScale"]) [gLyricsView rebuild];
 	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"]) { [gLyricsView rebuild]; [RLStore.shared translate]; }
 	else if ([key isEqualToString:@"enabled"]) RLSync();

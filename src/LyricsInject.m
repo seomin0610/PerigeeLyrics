@@ -95,7 +95,7 @@ static NSDictionary *RLLyricsObject(NSArray<RLLine *> *lines, NSString *trackId)
 		@"lrcText": [lrc componentsJoinedByString:@"\n"],
 		@"direction": @"LEFT_TO_RIGHT",
 		@"technicalStatus": @"OK",
-		@"provider": @{ @"source": @"THIRD_PARTY", @"name": @"Radiant Lyrics", @"commonTrackId": trackId, @"lyricsId": lid },
+		@"provider": @{ @"source": @"THIRD_PARTY", @"name": RLCredit(lines).string ?: RLSourceName(lines) ?: @"Radiant Lyrics", @"commonTrackId": trackId, @"lyricsId": lid },
 	} };
 }
 
@@ -131,9 +131,12 @@ static NSURLSessionDataTask *hook_dataTask(NSURLSession *self, SEL _cmd, NSURLRe
 		RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) {
 			RLCoverISRC(title, isrc, duration);
 			if (!title.length || !artist.length) { RLLog(@"no lyrics for %@, track info failed", trackId); done(data, resp, err); return; }
+			__block BOOL sent = NO;
 			RLFetch(title, artist, isrc, duration, NO, ^(NSArray<RLLine *> *lines) {
+				if (sent) return;
+				sent = YES;
 				NSData *fake = lines.count ? (relId ? RLRelationshipDocument(RLLyricsObject(lines, trackId), req.URL.path) : RLTrackDocument(data, RLLyricsObject(lines, trackId), trackId)) : nil;
-				RLLog(@"no TIDAL lyrics for %@ (%@ — %@): %@", trackId, title, artist, fake ? @"serving Radiant's" : @"Radiant has none either");
+				RLLog(@"no TIDAL lyrics for %@ (%@ — %@): %@", trackId, title, artist, fake ? [@"serving " stringByAppendingString:RLSourceName(lines) ?: @"?"] : @"no source has any either");
 				if (!fake) { done(data, resp, err); return; }
 				done(fake, [[NSHTTPURLResponse alloc] initWithURL:req.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{ @"Content-Type": @"application/vnd.api+json" }], nil);
 			});

@@ -514,6 +514,36 @@ static double RLSmooth(double p) {
 		ai.attributedText = s;
 		[_stack addArrangedSubview:ai];
 	}
+	UITextField *spicy = [UITextField new];
+	spicy.placeholder = @"sl_pk_…";
+	spicy.text = [RLDefaults stringForKey:@"rl.spicyKey"];
+	spicy.borderStyle = UITextBorderStyleRoundedRect;
+	spicy.autocorrectionType = UITextAutocorrectionTypeNo;
+	spicy.autocapitalizationType = UITextAutocapitalizationTypeNone;
+	spicy.spellCheckingType = UITextSpellCheckingTypeNo;
+	spicy.clearButtonMode = UITextFieldViewModeWhileEditing;
+	spicy.returnKeyType = UIReturnKeyDone;
+	[spicy.widthAnchor constraintEqualToConstant:170].active = YES;
+	[spicy addAction:[UIAction actionWithHandler:^(UIAction *a) { [a.sender resignFirstResponder]; }] forControlEvents:UIControlEventEditingDidEndOnExit];
+	__weak typeof(self) weakSpicy = self;
+	[spicy addAction:[UIAction actionWithHandler:^(UIAction *a) {
+		NSString *k = [((UITextField *)a.sender).text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+		if ([k isEqualToString:[RLDefaults stringForKey:@"rl.spicyKey"] ?: @""]) return;
+		RLSet(@"spicyKey", k);
+		[RLDefaults removeObjectForKey:@"rl.spicyRefused"];
+		RLSettingsChanged(@"spicyKey");
+		dispatch_async(dispatch_get_main_queue(), ^{ [weakSpicy build]; });
+	}] forControlEvents:UIControlEventEditingDidEnd];
+	[self row:RLL(@"Spicy Lyrics Key", @"Spicy Lyrics 키") control:spicy];
+	NSString *spicyKey = [RLDefaults stringForKey:@"rl.spicyKey"] ?: @"", *refused = [RLDefaults stringForKey:@"rl.spicyRefused"];
+	UILabel *spicyNote = [UILabel new];
+	spicyNote.font = [UIFont systemFontOfSize:13];
+	spicyNote.textColor = refused || [spicyKey hasPrefix:@"sl_sk_"] ? UIColor.systemRedColor : UIColor.secondaryLabelColor;
+	spicyNote.numberOfLines = 0;
+	spicyNote.text = refused ? [NSString stringWithFormat:RLL(@"Key rejected (%@). In the dashboard, client access must allow \"No origin header\".", @"키가 거절됐어요 (%@). 대시보드의 client access에서 \"No origin header\"를 허용해야 해요."), refused]
+		: [spicyKey hasPrefix:@"sl_sk_"] ? RLL(@"That's a secret key. Paste the publishable key (sl_pk_…).", @"secret 키예요. publishable 키(sl_pk_…)를 넣어주세요.")
+		: RLL(@"Optional. Needs a free key of your own: developers.spicylyrics.org → create an application → turn on client access with \"No origin header\" allowed → paste the publishable key.", @"선택 사항. 본인 무료 키가 필요해요: developers.spicylyrics.org에서 앱 만들기 → client access 켜고 \"No origin header\" 허용 → publishable 키 붙여넣기.");
+	[_stack addArrangedSubview:spicyNote];
 	[self toggle:@"blurInactive" title:RLL(@"Blur Inactive", @"비활성 줄 흐리게") def:YES];
 	[self toggle:@"dots" title:RLL(@"Dots During Instrumental Breaks", @"간주 중 점 표시") def:YES];
 	[self toggle:@"bounce" title:RLL(@"Staggered Scroll (lines follow one by one)", @"줄이 하나씩 따라오는 스크롤") def:YES];
@@ -561,7 +591,8 @@ static double RLSmooth(double p) {
 	[_stack addArrangedSubview:[UIButton buttonWithConfiguration:rc primaryAction:[UIAction actionWithHandler:^(UIAction *a) { [weakSelf confirmReset]; }]]];
 
 	UILabel *hint = [UILabel new];
-	hint.text = [RLL(@"Lyrics late? Tap +. Early? Tap −. Shake the device to open this sheet.", @"가사가 늦으면 +, 빠르면 −. 기기를 흔들면 이 창이 열려요.") stringByAppendingString:@"\nLyrics: Radiant Lyrics API (meowarex) · Korean translations: Musixmatch"];
+	hint.text = [RLL(@"Lyrics late? Tap +. Early? Tap −. Shake the device to open this sheet.", @"가사가 늦으면 +, 빠르면 −. 기기를 흔들면 이 창이 열려요.") stringByAppendingFormat:@"\nLyrics: Radiant Lyrics API (meowarex), Unison, BiniLyrics, Musixmatch, Spicy Lyrics · Translations: Musixmatch, NAVER VIBE, NetEase%@",
+		RLSourceName(RLStore.shared.lines) ? [RLL(@"\nThis song: ", @"\n이 곡: ") stringByAppendingString:RLSourceName(RLStore.shared.lines)] : @""];
 	hint.numberOfLines = 0;
 	hint.font = [UIFont systemFontOfSize:13];
 	hint.textColor = UIColor.secondaryLabelColor;
@@ -668,6 +699,7 @@ static double RLSmooth(double p) {
 	BOOL _dragging;
 	double _lastUserScroll;
 	CADisplayLink *_link;
+	UITextView *_credit;
 }
 
 static void RLTextLayers(CALayer *layer, CALayer *root, NSMutableArray<NSValue *> *out, int depth) {
@@ -802,6 +834,7 @@ static RLLyricsView *gCache;
 	UIView *hit = [super hitTest:point withEvent:event];
 	if (!hit || _scroll.isDecelerating) return hit;
 	CGPoint p = [self convertPoint:point toView:_scroll];
+	if (_credit && CGRectContainsPoint(_credit.frame, p)) return hit;
 	for (RLLineView *lv in _lineViews)
 		if (CGRectContainsPoint(CGRectInset(lv.frame, -8, -12), p)) return hit;
 	return nil;
@@ -819,6 +852,8 @@ static RLLyricsView *gCache;
 	[_activeSet removeAllIndexes];
 	[_dots removeFromSuperview];
 	_dots = nil;
+	[_credit removeFromSuperview];
+	_credit = nil;
 	_brk = -1;
 	_brkOpen = NO;
 	_focus = -2;
@@ -836,6 +871,21 @@ static RLLyricsView *gCache;
 	_dots = [[RLDotsView alloc] initWithSize:size];
 	_dots.hidden = YES;
 	[_scroll addSubview:_dots];
+	NSAttributedString *credit = RLCredit(_lines);
+	if (credit) {
+		NSMutableAttributedString *text = [credit mutableCopy];
+		[text addAttributes:@{ NSFontAttributeName: RLFont(@"SquareSansText-SemiBold", 13, UIFontWeightSemibold), NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.5] } range:NSMakeRange(0, text.length)];
+		_credit = [UITextView new];
+		_credit.editable = NO;
+		_credit.scrollEnabled = NO;
+		_credit.backgroundColor = UIColor.clearColor;
+		_credit.textContainerInset = UIEdgeInsetsZero;
+		_credit.textContainer.lineFragmentPadding = 0;
+		_credit.linkTextAttributes = @{ NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.75], NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle) };
+		_credit.attributedText = text;
+		_credit.frame = CGRectMake(margin, 0, width, [_credit sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)].height);
+		[_scroll addSubview:_credit];
+	}
 	[self relayout];
 	[self tick];
 }
@@ -860,6 +910,10 @@ static RLLyricsView *gCache;
 		lv.bounds = CGRectMake(0, 0, lv.bounds.size.width, lv.height);
 		lv.layer.position = CGPointMake(lv.layer.position.x, y + lv.height / 2);
 		y += lv.height + _gap;
+	}
+	if (_credit) {
+		_credit.frame = (CGRect){ CGPointMake(_credit.frame.origin.x, y), _credit.frame.size };
+		y += _credit.frame.size.height + _gap;
 	}
 	_scroll.contentSize = CGSizeMake(_builtSize.width, MAX(_builtSize.height, y + _insets.bottom + 120));
 }

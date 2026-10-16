@@ -32,7 +32,7 @@ NSArray<NSString *> *RLLogLines(void) {
 	@synchronized(gLog) { return [gLog copy]; }
 }
 
-static NSString *RLCollapse(NSString *s) {
+NSString *RLCollapse(NSString *s) {
 	static NSRegularExpression *re;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{ re = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil]; });
@@ -51,22 +51,20 @@ NSArray<RLSyl *> *RLWords(NSString *text, double t) {
 	return out;
 }
 
-static NSArray<NSNumber *> *RLSides(NSArray *data, NSDictionary *agents) {
+NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString *> *types) {
 	NSMutableDictionary<NSString *, NSNumber *> *map = [NSMutableDictionary dictionary];
 	NSInteger persons = 0;
-	for (NSDictionary *l in data) {
-		NSString *sid = RLAs(RLAs(RLAs(l, NSDictionary.class)[@"element"], NSDictionary.class)[@"singer"], NSString.class);
-		if (!sid || map[sid]) continue;
-		NSString *type = RLAs(RLAs(agents[sid], NSDictionary.class)[@"type"], NSString.class);
+	for (NSString *sid in singers) {
+		if (!RLAs(sid, NSString.class) || map[sid]) continue;
+		NSString *type = types[sid];
 		if (!type) type = [sid isEqualToString:@"v1000"] ? @"group" : [sid isEqualToString:@"v2000"] ? @"other" : @"person";
 		map[sid] = @(!([type isEqualToString:@"group"] || [type isEqualToString:@"other"]) && ++persons == 2);
 	}
 	NSMutableArray *sides = [NSMutableArray array];
 	NSInteger right = 0, total = 0;
-	for (NSDictionary *l in data) {
-		NSString *sid = RLAs(RLAs(RLAs(l, NSDictionary.class)[@"element"], NSDictionary.class)[@"singer"], NSString.class);
-		BOOL r = sid && [map[sid] boolValue];
-		if (sid) total++;
+	for (NSString *sid in singers) {
+		BOOL has = RLAs(sid, NSString.class) != nil, r = has && [map[sid] boolValue];
+		if (has) total++;
 		if (r) right++;
 		[sides addObject:@(r)];
 	}
@@ -79,19 +77,50 @@ NSString *RLLineKey(NSString *s) {
 	return [[s.lowercaseString componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
 }
 
+RLSyl *RLMakeSyl(NSString *text, double start, double end) {
+	RLSyl *s = [RLSyl new];
+	s.text = text;
+	s.start = start;
+	s.end = MAX(start, end);
+	return s;
+}
+
+RLLine *RLMakeLine(double start, double end, NSMutableArray<RLSyl *> *main, NSMutableArray<RLSyl *> *bg, NSString *keyText, BOOL right) {
+	if (!main.count) { [main addObjectsFromArray:bg]; [bg removeAllObjects]; }
+	for (RLSyl *b in bg.copy) {
+		b.text = [[b.text stringByReplacingOccurrencesOfString:@"(" withString:@""] stringByReplacingOccurrencesOfString:@")" withString:@""];
+		if (![b.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].length) [bg removeObject:b];
+	}
+	NSString *joined = [[main valueForKey:@"text"] componentsJoinedByString:@""];
+	if (![joined stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length) return nil;
+	RLLine *line = [RLLine new];
+	line.start = start;
+	line.end = end;
+	for (RLSyl *x in [main arrayByAddingObjectsFromArray:bg]) line.end = MAX(line.end, x.end);
+	line.main = main;
+	line.bg = bg;
+	line.key = RLLineKey(keyText.length ? keyText : joined);
+	line.right = right;
+	return line;
+}
+
 NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize) {
 	NSArray *data = RLAs(json[@"data"], NSArray.class);
 	if (!data) return nil;
-	NSArray *sides = RLSides(data, RLAs(RLAs(json[@"metadata"], NSDictionary.class)[@"agents"], NSDictionary.class));
+	NSDictionary *agents = RLAs(RLAs(json[@"metadata"], NSDictionary.class)[@"agents"], NSDictionary.class);
+	NSMutableArray *singers = [NSMutableArray array];
+	NSMutableDictionary *types = [NSMutableDictionary dictionary];
+	for (NSDictionary *l in data) [singers addObject:RLAs(RLAs(RLAs(l, NSDictionary.class)[@"element"], NSDictionary.class)[@"singer"], NSString.class) ?: NSNull.null];
+	for (NSString *sid in agents) {
+		NSString *type = RLAs(RLAs(agents[sid], NSDictionary.class)[@"type"], NSString.class);
+		if (type) types[sid] = type;
+	}
+	NSArray *sides = RLSides(singers, types);
 	NSMutableArray *lines = [NSMutableArray array];
 	[data enumerateObjectsUsingBlock:^(NSDictionary *l, NSUInteger i, BOOL *stop) {
 		if (!RLAs(l, NSDictionary.class)) return;
-		RLLine *line = [RLLine new];
-		line.start = [RLAs(l[@"startTime"], NSNumber.class) doubleValue];
+		double start = [RLAs(l[@"startTime"], NSNumber.class) doubleValue];
 		NSNumber *end = RLAs(l[@"endTime"], NSNumber.class);
-		line.end = end ? end.doubleValue : line.start + [RLAs(l[@"duration"], NSNumber.class) doubleValue];
-		line.right = [sides[i] boolValue];
-
 		NSMutableArray *main = [NSMutableArray array], *bg = [NSMutableArray array];
 		for (NSDictionary *s in RLAs(l[@"syllabus"], NSArray.class)) {
 			if (!RLAs(s, NSDictionary.class)) continue;
@@ -99,28 +128,17 @@ NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize) {
 			NSString *roman = RLAs(s[@"romanized"], NSString.class);
 			if (romanize && roman.length) text = RLCollapse(roman);
 			if (!text.length) continue;
-			RLSyl *syl = [RLSyl new];
-			syl.text = text;
-			syl.start = [RLAs(s[@"time"], NSNumber.class) doubleValue] / 1000.0;
-			syl.end = syl.start + [RLAs(s[@"duration"], NSNumber.class) doubleValue] / 1000.0;
-			[[RLAs(s[@"isBackground"], NSNumber.class) boolValue] ? bg : main addObject:syl];
+			double t = [RLAs(s[@"time"], NSNumber.class) doubleValue] / 1000.0;
+			[[RLAs(s[@"isBackground"], NSNumber.class) boolValue] ? bg : main addObject:RLMakeSyl(text, t, t + [RLAs(s[@"duration"], NSNumber.class) doubleValue] / 1000.0)];
 		}
 		if (!main.count && !bg.count) {
 			NSString *text = RLAs(l[@"text"], NSString.class);
 			NSString *roman = RLAs(l[@"romanized"], NSString.class);
 			if (romanize && roman.length) text = RLCollapse(roman);
-			if (text) [main addObjectsFromArray:RLWords(text, line.start)];
+			if (text) [main addObjectsFromArray:RLWords(text, start)];
 		}
-		if (!main.count) { [main addObjectsFromArray:bg]; [bg removeAllObjects]; }
-		for (RLSyl *b in bg.copy) {
-			b.text = [[b.text stringByReplacingOccurrencesOfString:@"(" withString:@""] stringByReplacingOccurrencesOfString:@")" withString:@""];
-			if (![b.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].length) [bg removeObject:b];
-		}
-		for (RLSyl *x in [main arrayByAddingObjectsFromArray:bg]) line.end = MAX(line.end, x.end);
-		if (![[[main valueForKey:@"text"] componentsJoinedByString:@""] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length) return;
-		line.main = main;
-		line.bg = bg;
-		line.key = RLLineKey(RLAs(l[@"text"], NSString.class) ?: [[main valueForKey:@"text"] componentsJoinedByString:@""]);
+		RLLine *line = RLMakeLine(start, end ? end.doubleValue : start + [RLAs(l[@"duration"], NSNumber.class) doubleValue], main, bg, RLAs(l[@"text"], NSString.class), [sides[i] boolValue]);
+		if (!line) return;
 		id tr = l[@"translation"];
 		NSString *trText = RLAs(RLAs(tr, NSDictionary.class)[@"text"], NSString.class) ?: RLAs(tr, NSString.class);
 		if (trText.length && ![RLLineKey(trText) isEqualToString:line.key])
@@ -194,19 +212,50 @@ static NSString *RLDiskPath(NSString *key) {
 	CC_SHA256(k.bytes, (CC_LONG)k.length, h);
 	NSMutableString *name = [NSMutableString string];
 	for (int i = 0; i < 16; i++) [name appendFormat:@"%02x", h[i]];
-	return [[dir stringByAppendingPathComponent:name] stringByAppendingPathExtension:@"json"];
+	return [dir stringByAppendingPathComponent:name];
 }
 
-static NSArray<RLLine *> *RLFromDisk(NSString *path, BOOL romanize) {
-	NSData *d = [NSData dataWithContentsOfFile:path];
-	NSArray *lines = d ? RLParse(RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class), romanize) : nil;
+#define kRLSources (@[ @"radiant", @"spicy", @"unison", @"binilyrics", @"musixmatch" ])
+
+static NSString *RLDiskFile(NSString *base, NSString *source) {
+	return [base stringByAppendingPathExtension:[source isEqualToString:@"radiant"] ? @"json" : source];
+}
+
+static NSArray<RLLine *> *RLParseAs(NSString *source, NSData *d, BOOL romanize) {
+	if (!d.length) return nil;
+	NSAttributedString *credit;
+	NSArray *lines = [source isEqualToString:@"radiant"] ? RLParse(RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class), romanize)
+		: [source isEqualToString:@"musixmatch"] ? RLParseMxm(d)
+		: [source isEqualToString:@"spicy"] ? RLParseSpicy(d, romanize, &credit)
+		: RLParseTTML(d, romanize);
 	if (!lines.count) return nil;
-	[NSFileManager.defaultManager setAttributes:@{ NSFileModificationDate: NSDate.date } ofItemAtPath:path error:nil];
-	RLLog(@"%lu lines from disk cache", (unsigned long)lines.count);
+	NSString *name = @{ @"radiant": @"Radiant Lyrics", @"spicy": @"Spicy Lyrics", @"unison": @"Unison", @"binilyrics": @"BiniLyrics", @"musixmatch": @"Musixmatch" }[source];
+	objc_setAssociatedObject(lines, @selector(RLSourceName:), name, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(lines, @selector(RLCredit:), credit, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	return lines;
 }
 
-static double RLClock(NSString *s) {
+NSString *RLSourceName(NSArray<RLLine *> *lines) { return lines ? objc_getAssociatedObject(lines, @selector(RLSourceName:)) : nil; }
+NSAttributedString *RLCredit(NSArray<RLLine *> *lines) { return lines ? objc_getAssociatedObject(lines, @selector(RLCredit:)) : nil; }
+
+static NSArray<RLLine *> *RLFromDisk(NSString *base, BOOL romanize) {
+	for (NSString *source in kRLSources) {
+		NSString *path = RLDiskFile(base, source);
+		NSArray *lines = RLParseAs(source, [NSData dataWithContentsOfFile:path], romanize);
+		if (!lines) continue;
+		[NSFileManager.defaultManager setAttributes:@{ NSFileModificationDate: NSDate.date } ofItemAtPath:path error:nil];
+		RLLog(@"%lu lines from disk cache (%@)", (unsigned long)lines.count, source);
+		return lines;
+	}
+	return nil;
+}
+
+static void RLDiskWrite(NSString *base, NSString *source, NSData *d) {
+	for (NSString *s in kRLSources) [NSFileManager.defaultManager removeItemAtPath:RLDiskFile(base, s) error:nil];
+	[d writeToFile:RLDiskFile(base, source) atomically:YES];
+}
+
+double RLClock(NSString *s) {
 	double t = 0;
 	for (NSString *p in [s componentsSeparatedByString:@":"]) t = t * 60 + p.doubleValue;
 	return t;
@@ -229,62 +278,125 @@ static BOOL RLSameSong(NSDictionary *json, NSString *title, NSString *artist, do
 	return same;
 }
 
+static NSData *RLRadiantGet(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL romanize, BOOL synth, BOOL flush, BOOL *answered) {
+	NSDictionary *auth = @{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam" };
+	NSString *cleanTitle = RLReplace(RLReplace(title, @"\\s*[\\(\\[][^\\)\\]]*[\\)\\]]"), @"\\s+-\\s+.*$");
+	NSString *firstArtist = RLReplace(artist, @"\\s*(,|&|\\sfeat\\.?\\s|\\sft\\.?\\s|\\swith\\s).*$");
+	NSOrderedSet *cands = [NSOrderedSet orderedSetWithArray:@[ @[title, artist], @[cleanTitle, artist], @[cleanTitle, firstArtist] ]];
+	*answered = NO;
+	for (NSArray *c in cands) {
+		if (![c[0] length] || ![c[1] length]) continue;
+		NSString *qs = [NSString stringWithFormat:@"?title=%@&artist=%@%@%@%@%@&platform=rl", RLEnc(c[0]), RLEnc(c[1]),
+		                isrc.length ? [@"&isrc=" stringByAppendingString:RLEnc(isrc)] : @"",
+		                romanize ? @"&romanize=true" : @"", synth ? @"&synthesize=true" : @"",
+		                flush && c == cands.firstObject ? @"&flush=true" : @""];
+		BOOL notFound = NO;
+		for (NSString *base in @[ @"https://api.atomix.one/rl-api", @"https://rl-api.kineticsand.net/lyrics" ]) {
+			NSData *d;
+			NSInteger st = RLGet([base stringByAppendingString:qs], [base containsString:@"atomix"] ? auth : nil, 12, &d);
+			RLLog(@"%ld %@ — %@ (%@)", (long)st, c[0], c[1], base);
+			if (st == 404) { notFound = YES; break; }
+			if (st != 200) continue;
+			NSDictionary *json = d ? RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class) : nil;
+			NSString *note = RLAs(json[@"_flush"], NSString.class);
+			if (note.length) RLLog(@"flush: %@", note);
+			if (RLSameSong(json, title, artist, duration) && RLParse(json, romanize).count) { *answered = YES; return d; }
+			notFound = YES;
+			break;
+		}
+		if (!notFound) return nil;
+	}
+	*answered = YES;
+	return nil;
+}
+
+static NSInteger RLScore(NSArray<RLLine *> *lines, NSString *source) {
+	BOOL word = NO;
+	for (RLLine *l in lines)
+		for (RLSyl *s in l.main)
+			if (s.end - s.start > 0.001) word = YES;
+	return (word ? (RLIsAI(lines) ? 1 : 2) : 0) * 2 + [source isEqualToString:@"radiant"];
+}
+
+@interface RLJob : NSObject
+@property (nonatomic) NSMutableArray *dones;
+@property (nonatomic) NSArray<RLLine *> *lines;
+@property (nonatomic, copy) NSString *source;
+@property (nonatomic) NSData *payload;
+@property (nonatomic) NSInteger score;
+@end
+@implementation RLJob
+@end
+
+// Every source is asked at once; the first answer shows and a better one (Radiant, or word timing over
+// line timing) replaces it, so done can run more than once.
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines)) {
 	static dispatch_queue_t queue;
+	static NSMutableDictionary<NSString *, RLJob *> *jobs;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
 		queue = dispatch_queue_create("rl.fetch", DISPATCH_QUEUE_SERIAL);
 		gLyricsCache = [NSCache new];
+		jobs = [NSMutableDictionary dictionary];
 	});
 	BOOL romanize = RLBool(@"romanize", NO), synth = RLBool(@"synth", NO);
 	NSString *key = [NSString stringWithFormat:@"%@\n%@\n%d%d", title, artist, romanize, synth];
 
 	dispatch_async(queue, ^{
-		NSString *path = RLDiskPath(key);
-		id hit = flush ? nil : [gLyricsCache objectForKey:key] ?: RLFromDisk(path, romanize);
+		RLJob *job = jobs[key];
+		if (job) {
+			[job.dones addObject:done];
+			NSArray *lines = job.lines;
+			if (lines) dispatch_async(dispatch_get_main_queue(), ^{ done(lines); });
+			return;
+		}
+		NSString *base = RLDiskPath(key);
+		id hit = flush ? nil : [gLyricsCache objectForKey:key] ?: RLFromDisk(base, romanize);
 		if (hit) {
 			[gLyricsCache setObject:hit forKey:key];
 			dispatch_async(dispatch_get_main_queue(), ^{ done(hit == NSNull.null ? nil : hit); });
 			return;
 		}
-		if (flush) [NSFileManager.defaultManager removeItemAtPath:path error:nil];
-		NSDictionary *auth = @{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam" };
+		if (flush) RLDiskWrite(base, @"radiant", nil);
+		RLJob *j = [RLJob new];
+		j.dones = [NSMutableArray arrayWithObject:done];
+		jobs[key] = j;
 
-		NSString *cleanTitle = RLReplace(RLReplace(title, @"\\s*[\\(\\[][^\\)\\]]*[\\)\\]]"), @"\\s+-\\s+.*$");
-		NSString *firstArtist = RLReplace(artist, @"\\s*(,|&|\\sfeat\\.?\\s|\\sft\\.?\\s|\\swith\\s).*$");
-		NSOrderedSet *cands = [NSOrderedSet orderedSetWithArray:@[ @[title, artist], @[cleanTitle, artist], @[cleanTitle, firstArtist] ]];
-
-		NSArray *result;
-		NSData *body;
-		for (NSArray *c in cands) {
-			if (![c[0] length] || ![c[1] length]) continue;
-			NSString *qs = [NSString stringWithFormat:@"?title=%@&artist=%@%@%@%@%@&platform=rl", RLEnc(c[0]), RLEnc(c[1]),
-			                isrc.length ? [@"&isrc=" stringByAppendingString:RLEnc(isrc)] : @"",
-			                romanize ? @"&romanize=true" : @"", synth ? @"&synthesize=true" : @"",
-			                flush && c == cands.firstObject ? @"&flush=true" : @""];
-			BOOL notFound = NO;
-			for (NSString *base in @[ @"https://api.atomix.one/rl-api", @"https://rl-api.kineticsand.net/lyrics" ]) {
-				NSData *d;
-				NSInteger st = RLGet([base stringByAppendingString:qs], [base containsString:@"atomix"] ? auth : nil, 12, &d);
-				RLLog(@"%ld %@ — %@ (%@)", (long)st, c[0], c[1], base);
-				if (st == 404) { notFound = YES; break; }
-				if (st != 200) continue;
-				NSDictionary *json = d ? RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class) : nil;
-				NSString *note = RLAs(json[@"_flush"], NSString.class);
-				if (note.length) RLLog(@"flush: %@", note);
-				result = RLSameSong(json, title, artist, duration) ? RLParse(json, romanize) : nil;
-				if (result.count) body = d;
-				notFound = !result.count;
-				break;
+		void (^offer)(NSString *, NSData *) = ^(NSString *source, NSData *d) {
+			NSArray *lines = RLParseAs(source, d, romanize);
+			if (!lines) return;
+			dispatch_async(queue, ^{
+				NSInteger score = RLScore(lines, source);
+				if (j.lines && score <= j.score) return;
+				RLLog(@"%@: %lu lines (score %ld)%@", source, (unsigned long)lines.count, (long)score, j.lines ? [@" replacing " stringByAppendingString:j.source] : @"");
+				j.lines = lines;
+				j.source = source;
+				j.payload = d;
+				j.score = score;
+				for (void (^f)(NSArray *) in j.dones) dispatch_async(dispatch_get_main_queue(), ^{ f(lines); });
+			});
+		};
+		__block BOOL answered = NO;
+		dispatch_group_t group = dispatch_group_create();
+		dispatch_queue_t net = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+		dispatch_group_async(group, net, ^{ BOOL a; offer(@"radiant", RLRadiantGet(title, artist, isrc, duration, romanize, synth, flush, &a)); answered = a; });
+		dispatch_group_async(group, net, ^{ offer(@"unison", RLUnisonGet(title, artist, duration)); });
+		dispatch_group_async(group, net, ^{ offer(@"binilyrics", RLBiniGet(title, artist, isrc, duration)); });
+		dispatch_group_async(group, net, ^{
+			NSData *mxm = RLMxmGet(title, artist, isrc, duration);
+			offer(@"spicy", RLSpicyGet(mxm));
+			offer(@"musixmatch", mxm);
+		});
+		// cached only when Radiant itself answered, so a Radiant outage doesn't pin a fallback forever
+		dispatch_group_notify(group, queue, ^{
+			[jobs removeObjectForKey:key];
+			if (answered) {
+				[gLyricsCache setObject:j.lines ?: NSNull.null forKey:key];
+				if (j.lines) RLDiskWrite(base, j.source, j.payload);
 			}
-			if (result.count) break;
-			if (!notFound) {
-				dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
-				return;
-			}
-		}
-		[gLyricsCache setObject:result.count ? result : NSNull.null forKey:key];
-		[body writeToFile:path atomically:YES];
-		dispatch_async(dispatch_get_main_queue(), ^{ done(result.count ? result : nil); });
+			RLLog(@"lyrics settled: %@", j.source ?: @"none");
+			if (!j.lines)
+				for (void (^f)(NSArray *) in j.dones) dispatch_async(dispatch_get_main_queue(), ^{ f(nil); });
+		});
 	});
 }

@@ -46,6 +46,22 @@ static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
 BOOL RLIsAI(NSArray<RLLine *> *lines);
+NSString *RLSourceName(NSArray<RLLine *> *lines);
+NSAttributedString *RLCredit(NSArray<RLLine *> *lines);
+NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString *> *types);
+RLSyl *RLMakeSyl(NSString *text, double start, double end);
+RLLine *RLMakeLine(double start, double end, NSMutableArray<RLSyl *> *main, NSMutableArray<RLSyl *> *bg, NSString *keyText, BOOL right);
+NSString *RLCollapse(NSString *s);
+double RLClock(NSString *s);
+NSDictionary *RLMxm(NSString *method, NSString *query, NSInteger *status);
+NSString *RLMxmToken(NSString *rejected);
+NSData *RLUnisonGet(NSString *title, NSString *artist, double duration);
+NSData *RLBiniGet(NSString *title, NSString *artist, NSString *isrc, double duration);
+NSData *RLMxmGet(NSString *title, NSString *artist, NSString *isrc, double duration);
+NSData *RLSpicyGet(NSData *mxm);
+NSArray<RLLine *> *RLParseTTML(NSData *d, BOOL romanize);
+NSArray<RLLine *> *RLParseMxm(NSData *d);
+NSArray<RLLine *> *RLParseSpicy(NSData *d, BOOL romanize, NSAttributedString **credit);
 void RLCoverTrack(NSString *title, NSString *artist, NSString *album, double duration);
 void RLCoverISRC(NSString *title, NSString *isrc, double duration);
 void RLCoverSync(UIView *player);

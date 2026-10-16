@@ -6,7 +6,7 @@ static NSString *const kAPI = @"https://apic-appmobile.musixmatch.com/ws/1.1/";
 
 static id RLAs(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
 
-static NSDictionary *RLMxm(NSString *method, NSString *query, NSInteger *status) {
+NSDictionary *RLMxm(NSString *method, NSString *query, NSInteger *status) {
 	NSString *url = [NSString stringWithFormat:@"%@%@?format=json&app_id=mac-ios-v2.0&%@", kAPI, method, query];
 	NSData *d;
 	RLGet(url, @{ @"Accept": @"application/json", @"x-mxm-app-version": @"10.1.1", @"X-User-Agent": @"Musixmatch/2025120901 CFNetwork/3860.300.31 Darwin/25.2.0" }, 10, &d);
@@ -15,20 +15,23 @@ static NSDictionary *RLMxm(NSString *method, NSString *query, NSInteger *status)
 	return RLAs(msg[@"body"], NSDictionary.class);
 }
 
-static NSString *RLMxmToken(BOOL fresh) {
-	NSString *token = fresh ? nil : RLAs([RLDefaults objectForKey:@"rl.mxmToken"], NSString.class);
-	if (token.length) return token;
-	NSInteger st;
-	token = RLAs(RLMxm(@"token.get", @"", &st)[@"user_token"], NSString.class);
-	RLLog(@"musixmatch: token %@ (%ld)", token.length ? @"received" : @"refused", (long)st);
-	if (!token.length) return nil;
-	RLSet(@"mxmToken", token);
-	return token;
+NSString *RLMxmToken(NSString *rejected) {
+	@synchronized(RLDefaults) {
+		NSString *token = RLAs([RLDefaults objectForKey:@"rl.mxmToken"], NSString.class);
+		if (token.length && ![token isEqualToString:rejected]) return token;
+		NSInteger st;
+		token = RLAs(RLMxm(@"token.get", @"", &st)[@"user_token"], NSString.class);
+		RLLog(@"musixmatch: token %@ (%ld)", token.length ? @"received" : @"refused", (long)st);
+		if (!token.length) return nil;
+		RLSet(@"mxmToken", token);
+		return token;
+	}
 }
 
 static NSArray<NSArray<NSString *> *> *RLMusixmatchFor(NSString *title, NSString *artist, NSString *lang) {
+	NSString *token;
 	for (int attempt = 0; attempt < 2; attempt++) {
-		NSString *token = RLMxmToken(attempt > 0);
+		token = RLMxmToken(token);
 		if (!token) return nil;
 		NSInteger st;
 		NSDictionary *track = RLAs(RLMxm(@"matcher.track.get", [NSString stringWithFormat:@"usertoken=%@&q_track=%@&q_artist=%@", RLEnc(token), RLEnc(title), RLEnc(artist)], &st)[@"track"], NSDictionary.class);
