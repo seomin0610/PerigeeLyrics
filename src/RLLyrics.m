@@ -202,7 +202,30 @@ static NSArray<RLLine *> *RLFromDisk(NSString *path, BOOL romanize) {
 	return lines;
 }
 
-void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void (^done)(NSArray<RLLine *> *lines)) {
+static double RLClock(NSString *s) {
+	double t = 0;
+	for (NSString *p in [s componentsSeparatedByString:@":"]) t = t * 60 + p.doubleValue;
+	return t;
+}
+
+// A name in another script (米津玄師 for Kenshi Yonezu) can't be compared, so it passes.
+static BOOL RLSameName(NSString *got, NSString *want) {
+	NSString *a = RLLineKey(got ?: @""), *b = RLLineKey(want ?: @"");
+	if (!a.length || !b.length || [a containsString:b] || [b containsString:a]) return YES;
+	return [a canBeConvertedToEncoding:NSASCIIStringEncoding] != [b canBeConvertedToEncoding:NSASCIIStringEncoding];
+}
+
+static BOOL RLSameSong(NSDictionary *json, NSString *title, NSString *artist, double duration) {
+	NSDictionary *meta = RLAs(json[@"metadata"], NSDictionary.class);
+	NSNumber *ms = RLAs(meta[@"durationMs"], NSNumber.class);
+	double got = ms ? ms.doubleValue / 1000 : RLClock(RLAs(meta[@"totalDuration"], NSString.class));
+	BOOL same = !(duration > 0 && got > 0 && fabs(got - duration) > MAX(20, duration * 0.12))
+		&& RLSameName(RLAs(meta[@"title"], NSString.class), title) && RLSameName(RLAs(meta[@"artist"], NSString.class), artist);
+	if (!same) RLLog(@"rejected: Radiant sent %@ — %@ (%.0fs) for %@ — %@ (%.0fs)", meta[@"title"], meta[@"artist"], got, title, artist, duration);
+	return same;
+}
+
+void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines)) {
 	static dispatch_queue_t queue;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
@@ -245,7 +268,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void
 				NSDictionary *json = d ? RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class) : nil;
 				NSString *note = RLAs(json[@"_flush"], NSString.class);
 				if (note.length) RLLog(@"flush: %@", note);
-				result = RLParse(json, romanize);
+				result = RLSameSong(json, title, artist, duration) ? RLParse(json, romanize) : nil;
 				if (result.count) body = d;
 				notFound = !result.count;
 				break;

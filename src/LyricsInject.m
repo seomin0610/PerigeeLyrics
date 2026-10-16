@@ -46,7 +46,17 @@ static BOOL RLTidalHasLyrics(NSData *data, NSURLResponse *resp) {
 	return NO;
 }
 
-static void RLTrackInfo(NSURLSession *session, NSURLRequest *lyricsReq, NSString *trackId, void (^done)(NSString *title, NSString *artist, NSString *isrc)) {
+static double RLISODuration(NSString *s) {
+	if (![s hasPrefix:@"PT"]) return 0;
+	double total = 0, n = 0;
+	NSString *unit;
+	NSScanner *sc = [NSScanner scannerWithString:[s substringFromIndex:2]];
+	while ([sc scanDouble:&n] && [sc scanCharactersFromSet:[NSCharacterSet characterSetWithCharactersInString:@"HMS"] intoString:&unit])
+		total += n * ([unit isEqualToString:@"H"] ? 3600 : [unit isEqualToString:@"M"] ? 60 : 1);
+	return total;
+}
+
+static void RLTrackInfo(NSURLSession *session, NSURLRequest *lyricsReq, NSString *trackId, void (^done)(NSString *title, NSString *artist, NSString *isrc, double duration)) {
 	NSURLComponents *c = [NSURLComponents componentsWithURL:lyricsReq.URL resolvingAgainstBaseURL:NO];
 	NSString *country;
 	for (NSURLQueryItem *q in c.queryItems)
@@ -67,7 +77,7 @@ static void RLTrackInfo(NSURLSession *session, NSURLRequest *lyricsReq, NSString
 		for (NSDictionary *inc in RLAs(json[@"included"], NSArray.class))
 			if ([RLAs(inc, NSDictionary.class)[@"type"] isEqual:@"artists"] && (!artist || [inc[@"id"] isEqual:firstId]))
 				artist = RLAs(RLAs(inc[@"attributes"], NSDictionary.class)[@"name"], NSString.class) ?: artist;
-		done(title, artist, RLAs(attrs[@"isrc"], NSString.class));
+		done(title, artist, RLAs(attrs[@"isrc"], NSString.class), RLISODuration(RLAs(attrs[@"duration"], NSString.class)));
 	}) resume];
 }
 
@@ -117,9 +127,9 @@ static NSURLSessionDataTask *hook_dataTask(NSURLSession *self, SEL _cmd, NSURLRe
 			done(data, resp, err);
 			return;
 		}
-		RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc) {
+		RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) {
 			if (!title.length || !artist.length) { RLLog(@"no lyrics for %@, track info failed", trackId); done(data, resp, err); return; }
-			RLFetch(title, artist, isrc, NO, ^(NSArray<RLLine *> *lines) {
+			RLFetch(title, artist, isrc, duration, NO, ^(NSArray<RLLine *> *lines) {
 				NSData *fake = lines.count ? (relId ? RLRelationshipDocument(RLLyricsObject(lines, trackId), req.URL.path) : RLTrackDocument(data, RLLyricsObject(lines, trackId), trackId)) : nil;
 				RLLog(@"no TIDAL lyrics for %@ (%@ — %@): %@", trackId, title, artist, fake ? @"serving Radiant's" : @"Radiant has none either");
 				if (!fake) { done(data, resp, err); return; }

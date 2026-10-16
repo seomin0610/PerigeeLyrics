@@ -44,7 +44,7 @@ static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	NSString *lang = RLTrLang();
 	return [lang isEqualToString:@"en"] ? l.tr : l.mx[lang];
 }
-void RLFetch(NSString *title, NSString *artist, NSString *isrc, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
+void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
 
 @interface RLStore : NSObject
 + (instancetype)shared;

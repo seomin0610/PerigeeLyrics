@@ -136,6 +136,7 @@ static void RLUntint(void);
 
 	NSString *title = info[MPMediaItemPropertyTitle], *artist = info[MPMediaItemPropertyArtist];
 	if (title.length && artist.length && !([title isEqualToString:_title] && [artist isEqualToString:_artist])) {
+		if (!info[MPMediaItemPropertyPlaybackDuration]) _duration = 0;
 		self.title = title;
 		self.artist = artist;
 		[self refetch];
@@ -156,7 +157,7 @@ static void RLUntint(void);
 	self.lines = nil;
 	self.status = RLStatusLoading;
 	RLSync();
-	RLFetch(_title, _artist, nil, flush, ^(NSArray<RLLine *> *lines) {
+	RLFetch(_title, _artist, nil, _duration, flush, ^(NSArray<RLLine *> *lines) {
 		if (fid != self->_fetchId) return;
 		self.lines = lines;
 		self.status = lines ? RLStatusOK : RLStatusMissing;
