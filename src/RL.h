@@ -46,11 +46,14 @@ static inline BOOL RLVibeFirst(NSString *lang) { return [lang isEqualToString:@"
 static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	NSString *lang = RLTrLang();
 	if (!RLBool(@"tr", NO) || RLInLang(l, lang)) return nil;
-	return l.mx[lang].count && (RLVibeFirst(lang) || !l.tr.count) ? l.mx[lang] : l.tr;
+	// rl-api's (or a TTML source's English) translation vs. VIBE/Musixmatch/NetEase's
+	NSArray *api = l.mx[[@"rl." stringByAppendingString:lang]] ?: ([lang isEqualToString:@"en"] ? l.tr : nil), *own = l.mx[lang];
+	return own.count && (RLVibeFirst(lang) || !api.count) ? own : api;
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLAIType(NSArray<RLLine *> *lines);
-BOOL RLHasTr(NSArray<RLLine *> *lines);
+BOOL RLHasTr(NSArray<RLLine *> *lines, NSString *lang);
+void RLRadiantTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NSString *lang, void (^done)(BOOL found));
 void RLRetime(NSString *title, NSString *artist, double duration, NSArray<RLLine *> *lines, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLSourceName(NSArray<RLLine *> *lines);
 NSAttributedString *RLCredit(NSArray<RLLine *> *lines);

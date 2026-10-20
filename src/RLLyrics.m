@@ -118,7 +118,7 @@ RLLine *RLMakeLine(double start, double end, NSMutableArray<RLSyl *> *main, NSMu
 
 NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize) {
 	NSArray *data = RLAs(json[@"data"], NSArray.class);
-	if (!data) return nil;
+	if (!data || ![@[ @"Word", @"Line" ] containsObject:json[@"type"] ?: @"Line"]) return nil;
 	NSDictionary *agents = RLAs(RLAs(json[@"metadata"], NSDictionary.class)[@"agents"], NSDictionary.class);
 	NSMutableArray *singers = [NSMutableArray array];
 	NSMutableDictionary *types = [NSMutableDictionary dictionary];
@@ -169,12 +169,16 @@ NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize) {
 	}];
 	if ([json[@"type"] isEqual:@"Word"] && [RLAs(json[@"_synthesized"], NSNumber.class) boolValue])
 		objc_setAssociatedObject(lines, @selector(RLAIType:), RLAs(json[@"_synthesisType"], NSString.class) ?: @"Synthesize", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	if (translated) objc_setAssociatedObject(lines, @selector(RLHasTr:), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	return lines;
 }
 
 NSString *RLAIType(NSArray<RLLine *> *lines) { return lines ? objc_getAssociatedObject(lines, @selector(RLAIType:)) : nil; }
-BOOL RLHasTr(NSArray<RLLine *> *lines) { return lines && [objc_getAssociatedObject(lines, @selector(RLHasTr:)) boolValue]; }
+BOOL RLHasTr(NSArray<RLLine *> *lines, NSString *lang) {
+	NSString *k = [@"rl." stringByAppendingString:lang];
+	for (RLLine *l in lines)
+		if (l.mx[k]) return YES;
+	return NO;
+}
 
 #pragma mark - Network
 
@@ -310,13 +314,13 @@ static BOOL RLSameSong(NSDictionary *json, NSString *title, NSString *artist, do
 #define kRLAuth (@{ @"P-Access-Token-Id": @"58hy4s86", @"P-Access-Token": @"xjehy2lfg5h5mjwotoxrcqugam" })
 
 // rl-api translates into these itself (?language=), word-timed; other languages are left to RLTranslate.
-static NSString *RLTrAPI(void) {
-	if (!RLBool(@"tr", NO)) return nil;
-	return @{ @"en": @"english", @"es": @"spanish", @"fr": @"french", @"de": @"german", @"pt": @"portuguese", @"it": @"italian", @"ru": @"russian", @"ja": @"japanese", @"ko": @"korean", @"zh": @"chinese" }[RLTrLang()];
+static NSString *RLTrAPI(NSString *lang) {
+	return @{ @"en": @"english", @"es": @"spanish", @"fr": @"french", @"de": @"german", @"pt": @"portuguese", @"it": @"italian", @"ru": @"russian", @"ja": @"japanese", @"ko": @"korean", @"zh": @"chinese" }[lang];
 }
 
+// "0" is where the old synth flag was, so lyrics cached before RL 2.0 still hit
 static NSString *RLFetchKey(NSString *title, NSString *artist) {
-	return [NSString stringWithFormat:@"%@\n%@\n%d%@%@", title, artist, RLBool(@"romanize", NO), RLBool(@"allowAI", YES) ? @"" : @"n", RLTrAPI() ?: @""];
+	return [NSString stringWithFormat:@"%@\n%@\n%d0%@", title, artist, RLBool(@"romanize", NO), RLBool(@"allowAI", YES) ? @"" : @"n"];
 }
 
 static NSData *RLRadiantGet(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL romanize, NSString *tr, BOOL flush, BOOL *answered) {
@@ -334,7 +338,7 @@ static NSData *RLRadiantGet(NSString *title, NSString *artist, NSString *isrc, d
 		BOOL notFound = NO;
 		for (NSString *base in @[ @"https://api.atomix.one/rl-api", @"https://rl-api.kineticsand.net/lyrics" ]) {
 			NSData *d;
-			NSInteger st = RLGet([base stringByAppendingString:qs], [base containsString:@"atomix"] ? auth : nil, flush && c == cands.firstObject ? 30 : 12, &d);
+			NSInteger st = RLGet([base stringByAppendingString:qs], [base containsString:@"atomix"] ? auth : nil, 30, &d);
 			RLLog(@"%ld %@ — %@ (%@)", (long)st, c[0], c[1], base);
 			if (st == 404) { notFound = YES; break; }
 			if (st != 200) continue;
@@ -353,6 +357,7 @@ static NSData *RLRadiantGet(NSString *title, NSString *artist, NSString *isrc, d
 }
 
 static NSInteger RLScore(NSArray<RLLine *> *lines, NSString *source) {
+	if ([[lines valueForKeyPath:@"@max.start"] doubleValue] <= 0) return -1;
 	BOOL word = NO;
 	for (RLLine *l in lines)
 		for (RLSyl *s in l.main)
@@ -369,6 +374,30 @@ static NSInteger RLScore(NSArray<RLLine *> *lines, NSString *source) {
 @end
 @implementation RLJob
 @end
+
+// rl-api's translations are a second request, so the lyrics never wait on them. Merged line by line, which only
+// lines up when the lyrics on screen are Radiant's own.
+void RLRadiantTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NSString *lang, void (^done)(BOOL found)) {
+	NSString *api = RLTrAPI(lang);
+	if (!api || ![RLSourceName(lines) isEqualToString:@"Radiant Lyrics"]) { done(NO); return; }
+	if (RLHasTr(lines, lang)) { done(YES); return; }
+	BOOL romanize = RLBool(@"romanize", NO);
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+		BOOL answered;
+		NSData *d = RLRadiantGet(title, artist, nil, 0, romanize, api, NO, &answered);
+		NSArray<RLLine *> *got = d ? RLParse(RLAs([NSJSONSerialization JSONObjectWithData:d options:0 error:nil], NSDictionary.class), romanize) : nil;
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSString *k = [@"rl." stringByAppendingString:lang];
+			for (NSUInteger i = 0; got.count == lines.count && i < got.count; i++) {
+				if (![got[i].key isEqualToString:lines[i].key]) continue;
+				if (!lines[i].mx) lines[i].mx = [NSMutableDictionary dictionary];
+				lines[i].mx[k] = got[i].tr ?: @[];
+			}
+			RLLog(@"rl-api %@ translation: %@", lang, RLHasTr(lines, lang) ? @"merged" : got ? @"lines don't line up" : @"none");
+			done(RLHasTr(lines, lang));
+		});
+	});
+}
 
 #pragma mark - Sylla
 
@@ -423,11 +452,10 @@ static NSDictionary *RLSyllaInput(NSArray<RLLine *> *lines, NSString *title) {
 }
 
 // sylla-align retimes the given lyrics to the audio, sylla-gen (no lyrics) transcribes them; both answer rl-api's
-// Word shape, already romanized/translated like the request. Same calls as radiant-lyrics-luna api.ts.
+// Word shape, already romanized like the request. Same calls as radiant-lyrics-luna api.ts.
 static NSData *RLSyllaPost(NSDictionary *lyrics, NSArray<NSString *> *ref, NSString *title, NSString *artist) {
-	NSString *tr = RLTrAPI(), *label = lyrics ? @"sylla-align" : @"sylla-gen";
-	NSString *url = [NSString stringWithFormat:@"https://api.atomix.one/%@?romanize=%@&translate=%@&language=%@&ai-preference=true", label,
-	                 RLBool(@"romanize", NO) ? @"true" : @"false", tr ? @"true" : @"false", tr ?: @"english"];
+	NSString *label = lyrics ? @"sylla-align" : @"sylla-gen";
+	NSString *url = [NSString stringWithFormat:@"https://api.atomix.one/%@?romanize=%@&translate=false&language=english&ai-preference=true", label, RLBool(@"romanize", NO) ? @"true" : @"false"];
 	NSMutableDictionary *body = [@{ @"tidal_id": ref[1], @"isrc": ref[0], @"title": title, @"artist": artist } mutableCopy];
 	body[@"lyrics"] = lyrics;
 	NSMutableDictionary *headers = [kRLAuth mutableCopy];
@@ -443,7 +471,6 @@ static NSData *RLSyllaPost(NSDictionary *lyrics, NSArray<NSString *> *ref, NSStr
 	out[@"_synthesized"] = @YES;
 	out[@"_synthesisType"] = lyrics ? @"Align" : @"Generate";
 	out[@"_confidence"] = json[@"confidence"] ?: @0;
-	if (tr) out[@"_translated"] = @YES;
 	RLRespace(out, RLAs(json[@"lines"], NSArray.class));
 	RLLog(@"%@ for %@ — %@: %@ %@, confidence %@", label, title, artist, json[@"model"], json[@"verdict"], json[@"confidence"]);
 	return [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
@@ -499,7 +526,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration,
 	});
 	dispatch_queue_t queue = gFetchQ;
 	BOOL romanize = RLBool(@"romanize", NO), sylla = RLBool(@"allowAI", YES) && RLBool(@"radiantAI", NO);
-	NSString *key = RLFetchKey(title, artist), *tr = RLTrAPI();
+	NSString *key = RLFetchKey(title, artist);
 
 	dispatch_async(queue, ^{
 		RLJob *job = jobs[key];
@@ -580,7 +607,7 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration,
 		};
 		dispatch_group_async(group, net, ^{
 			BOOL a;
-			offer(@"radiant", RLRadiantGet(title, artist, isrc, duration, romanize, tr, flush, &a));
+			offer(@"radiant", RLRadiantGet(title, artist, isrc, duration, romanize, nil, flush, &a));
 			answered = a;
 			if (flush && a) others();
 		});

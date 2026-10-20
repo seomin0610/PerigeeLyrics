@@ -715,7 +715,7 @@ static double RLSmooth(double p) {
 	CGSize _builtSize;
 	UIEdgeInsets _insets;
 	CGFloat _tidalAlpha, _nativeSize, _nativeMargin, _anchor, _gap;
-	BOOL _measured;
+	BOOL _measured, _unsynced;
 	BOOL _dragging;
 	double _lastUserScroll;
 	CADisplayLink *_link;
@@ -877,6 +877,7 @@ static RLLyricsView *gCache;
 	_brk = -1;
 	_brkOpen = NO;
 	_focus = -2;
+	_unsynced = [[_lines valueForKeyPath:@"@max.start"] doubleValue] <= 0;
 	_builtSize = self.bounds.size;
 	if (!_lines.count || _builtSize.width <= 0) { _scroll.contentSize = CGSizeZero; return; }
 
@@ -995,7 +996,7 @@ static RLLyricsView *gCache;
 
 - (void)tick {
 	if (![self followTidal]) { [self detach]; return; }
-	double t = RLStore.shared.now, now = CACurrentMediaTime();
+	double t = _unsynced ? -1 : RLStore.shared.now, now = CACurrentMediaTime();
 
 	NSMutableIndexSet *active = [NSMutableIndexSet indexSet];
 	NSInteger last = -1, brk = -1;
@@ -1051,7 +1052,7 @@ static RLLyricsView *gCache;
 	for (RLLineView *lv in _lineViews) [lv setDrawn:lv.top + lv.height >= y - h && lv.top <= y + 2 * h];
 
 	NSInteger focus = brk >= 0 ? brk : active.count ? (NSInteger)active.firstIndex : last;
-	if (_lastUserScroll > 0 && !_dragging && now - _lastUserScroll > 3) { _lastUserScroll = 0; _focus = -3; }
+	if (_lastUserScroll > 0 && !_dragging && !_unsynced && now - _lastUserScroll > 3) { _lastUserScroll = 0; _focus = -3; }
 	if (focus != _focus && !_dragging && _lastUserScroll == 0) {
 		BOOL animated = _focus != -2;
 		BOOL next = RLBool(@"bounce", YES) && _focus >= 0 && focus > _focus && focus - _focus <= 2 && active.count <= 1;
@@ -1061,6 +1062,7 @@ static RLLyricsView *gCache;
 }
 
 - (void)tapLyrics:(UITapGestureRecognizer *)g {
+	if (_unsynced) return;
 	CGPoint p = [g locationInView:_scroll];
 	for (RLLineView *lv in _lineViews)
 		if (CGRectContainsPoint(CGRectInset(lv.frame, -8, -12), p)) {
