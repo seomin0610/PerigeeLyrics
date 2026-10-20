@@ -41,11 +41,12 @@ static inline NSString *RLTrLang(void) {
 
 static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	if (!RLBool(@"tr", NO)) return nil;
-	NSString *lang = RLTrLang();
-	return [lang isEqualToString:@"en"] ? l.tr : l.mx[lang];
+	return l.tr ?: l.mx[RLTrLang()];
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
-BOOL RLIsAI(NSArray<RLLine *> *lines);
+NSString *RLAIType(NSArray<RLLine *> *lines);
+BOOL RLHasTr(NSArray<RLLine *> *lines);
+void RLRetime(NSString *title, NSString *artist, double duration, NSArray<RLLine *> *lines, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLSourceName(NSArray<RLLine *> *lines);
 NSAttributedString *RLCredit(NSArray<RLLine *> *lines);
 NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString *> *types);
@@ -63,7 +64,8 @@ NSArray<RLLine *> *RLParseTTML(NSData *d, BOOL romanize);
 NSArray<RLLine *> *RLParseMxm(NSData *d);
 NSArray<RLLine *> *RLParseSpicy(NSData *d, BOOL romanize, NSAttributedString **credit);
 void RLCoverTrack(NSString *title, NSString *artist, NSString *album, double duration);
-void RLCoverISRC(NSString *title, NSString *isrc, double duration);
+void RLTrackSeen(NSString *title, NSString *isrc, double duration, NSString *trackId);
+NSArray<NSString *> *RLTrackRef(NSString *title, double duration);
 void RLCoverSync(UIView *player);
 void RLCoverSetting(void);
 
@@ -76,6 +78,8 @@ void RLCoverSetting(void);
 - (double)now;
 - (void)refetch;
 - (void)refetch:(BOOL)flush;
+- (void)refresh;
+- (void)retime;
 - (void)translate;
 - (void)seek:(double)t;
 @end

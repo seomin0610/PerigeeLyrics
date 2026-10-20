@@ -106,7 +106,7 @@ static void RLUntint(void);
 @end
 
 @implementation RLStore {
-	double _elapsed, _rate, _stamp, _duration;
+	double _elapsed, _rate, _stamp, _duration, _hold;
 	NSUInteger _fetchId;
 	id _artworkObj;
 }
@@ -121,7 +121,7 @@ static void RLUntint(void);
 - (BOOL)playing { return _rate > 0; }
 
 - (double)rawNow {
-	double t = _elapsed + (CACurrentMediaTime() - _stamp) * _rate;
+	double t = _elapsed + MAX(0, CACurrentMediaTime() - MAX(_stamp, _hold)) * _rate;
 	return _duration > 0 ? MIN(t, _duration) : t;
 }
 
@@ -130,7 +130,7 @@ static void RLUntint(void);
 - (void)nowPlayingInfo:(NSDictionary *)info stamp:(double)stamp {
 	NSNumber *el = info[MPNowPlayingInfoPropertyElapsedPlaybackTime], *rate = info[MPNowPlayingInfoPropertyPlaybackRate];
 	if (rate && !el) { _elapsed = [self rawNow]; _stamp = stamp; }
-	if (el) { _elapsed = el.doubleValue; _stamp = stamp; }
+	if (el) { _elapsed = el.doubleValue; _stamp = stamp; _hold = 0; }
 	if (rate) _rate = rate.doubleValue;
 	if (info[MPMediaItemPropertyPlaybackDuration]) _duration = [info[MPMediaItemPropertyPlaybackDuration] doubleValue];
 
@@ -150,29 +150,47 @@ static void RLUntint(void);
 	}
 }
 
-- (void)refetch { [self refetch:NO]; }
+- (void)refetch { [self fetch:NO keep:NO]; }
+- (void)refetch:(BOOL)flush { [self fetch:flush keep:flush]; }
+- (void)refresh { [self fetch:NO keep:YES]; }
 
-- (void)refetch:(BOOL)flush {
+// keep: the lines on screen stay until an answer replaces them (a setting changed, same song)
+- (void)fetch:(BOOL)flush keep:(BOOL)keep {
 	if (!_title) return;
 	NSUInteger fid = ++_fetchId;
-	self.lines = nil;
-	self.status = RLStatusLoading;
-	RLSync();
-	RLFetch(_title, _artist, nil, _duration, flush, ^(NSArray<RLLine *> *lines) {
-		if (fid != self->_fetchId) return;
-		self.lines = lines;
-		self.status = lines ? RLStatusOK : RLStatusMissing;
-		RLLog(@"%lu lines for %@ — %@ (%@)", (unsigned long)lines.count, self.title, self.artist, RLSourceName(lines));
-		[gLyricsView reload];
+	NSArray *old = keep ? self.lines : nil;
+	if (!old) {
+		self.lines = nil;
+		self.status = RLStatusLoading;
 		RLSync();
-		[self translate];
+	}
+	RLFetch(_title, _artist, nil, _duration, flush, ^(NSArray<RLLine *> *lines) {
+		if (fid != self->_fetchId || (old && !lines)) return;
+		[self show:lines];
+	});
+}
+
+- (void)show:(NSArray<RLLine *> *)lines {
+	self.lines = lines;
+	self.status = lines ? RLStatusOK : RLStatusMissing;
+	RLLog(@"%lu lines for %@ — %@ (%@%@)", (unsigned long)lines.count, self.title, self.artist, RLSourceName(lines), RLAIType(lines) ? [@", Sylla " stringByAppendingString:RLAIType(lines)] : @"");
+	[gLyricsView reload];
+	RLSync();
+	[self translate];
+}
+
+- (void)retime {
+	if (!_title) return;
+	NSUInteger fid = _fetchId;
+	RLRetime(_title, _artist, _duration, self.lines, ^(NSArray<RLLine *> *lines) {
+		if (lines && fid == self->_fetchId) [self show:lines];
 	});
 }
 
 - (void)translate {
 	NSArray<RLLine *> *lines = self.lines;
 	NSString *lang = RLTrLang();
-	if (!RLBool(@"tr", NO) || [lang isEqualToString:@"en"] || !lines.count || lines.firstObject.mx[lang]) return;
+	if (!RLBool(@"tr", NO) || RLHasTr(lines) || !lines.count || lines.firstObject.mx[lang]) return;
 	NSUInteger fid = _fetchId;
 	RLTranslate(lines, _title, _artist, lang, ^(BOOL found) {
 		if (found && fid == self->_fetchId) [gLyricsView rebuild];
@@ -185,7 +203,7 @@ static void RLUntint(void);
 	RLSeekEvent *e = class_createInstance(RLSeekEvent.class, 0);
 	e.rlCommand = cmd;
 	e.rlPosition = t;
-	if (cmd.enabled && RLInvoke(cmd, e)) { _elapsed = t; _stamp = CACurrentMediaTime(); }
+	if (cmd.enabled && RLInvoke(cmd, e)) { _elapsed = t; _stamp = CACurrentMediaTime(); _hold = _stamp + 5; }
 }
 @end
 
@@ -300,10 +318,10 @@ void RLReplay(void) {
 }
 
 void RLSettingsChanged(NSString *key) {
-	if ([key isEqualToString:@"romanize"] || [key isEqualToString:@"synth"]) [RLStore.shared refetch];
+	if ([key isEqualToString:@"romanize"] || [key isEqualToString:@"allowAI"] || [key isEqualToString:@"radiantAI"]) [RLStore.shared refresh];
 	else if ([key isEqualToString:@"spicyKey"]) [RLStore.shared refetch:YES];
 	else if ([key isEqualToString:@"fontScale"]) [gLyricsView rebuild];
-	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"]) { [gLyricsView rebuild]; [RLStore.shared translate]; }
+	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"]) { [gLyricsView rebuild]; [RLStore.shared refresh]; }
 	else if ([key isEqualToString:@"enabled"]) RLSync();
 	else if ([key isEqualToString:@"backdrop"]) RLSyncBackdrop();
 	else if ([key isEqualToString:@"animCover"]) { RLCoverSetting(); RLSyncBackdrop(); }

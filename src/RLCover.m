@@ -15,7 +15,7 @@ static AVPlayerLayer *gLayer;
 
 static id RLAs(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
 
-static NSString *RLCoverISRCFor(NSString *title, double duration) {
+static NSArray *RLSeen(NSString *title, double duration) {
 	NSString *want = RLLineKey(title ?: @"");
 	if (!want.length) return nil;
 	for (int loose = 0; loose < 2; loose++)
@@ -23,9 +23,16 @@ static NSString *RLCoverISRCFor(NSString *title, double duration) {
 			NSString *got = e[0];
 			double d = [e[2] doubleValue];
 			BOOL name = loose ? [got containsString:want] || [want containsString:got] : [got isEqualToString:want];
-			if (name && !(duration > 0 && d > 0 && fabs(d - duration) > 3)) return e[1];
+			if (name && !(duration > 0 && d > 0 && fabs(d - duration) > 3)) return e;
 		}
 	return nil;
+}
+
+static NSString *RLCoverISRCFor(NSString *title, double duration) { return RLSeen(title, duration)[1]; }
+
+NSArray<NSString *> *RLTrackRef(NSString *title, double duration) {
+	NSArray *e = RLSeen(title, duration);
+	return [e[3] length] ? @[ e[1], e[3] ] : nil;
 }
 
 static NSString *RLCoverLookup(NSString *query, BOOL *answered) {
@@ -67,11 +74,11 @@ static void RLCoverStop(void) {
 	gWaiting = NO;
 }
 
-void RLCoverISRC(NSString *title, NSString *isrc, double duration) {
+void RLTrackSeen(NSString *title, NSString *isrc, double duration, NSString *trackId) {
 	if (!title.length || !isrc.length) return;
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (!gISRCs) gISRCs = [NSMutableArray array];
-		[gISRCs addObject:@[ RLLineKey(title), isrc, @(duration) ]];
+		[gISRCs addObject:@[ RLLineKey(title), isrc, @(duration), trackId ?: @"" ]];
 		if (gISRCs.count > 50) [gISRCs removeObjectAtIndex:0];
 		if (gWaiting && RLCoverISRCFor(gTitle, gDuration)) RLCoverResolve(gSeq);
 	});
