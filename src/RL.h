@@ -40,10 +40,13 @@ static inline NSString *RLTrLang(void) {
 	return [kRLTrLangs containsObject:l] ? l : @"en";
 }
 
+// Korean: VIBE's own translations (rl.koSource 0, default) or rl-api's word-timed machine ones first
+static inline BOOL RLVibeFirst(NSString *lang) { return [lang isEqualToString:@"ko"] && !RLNum(@"koSource", 0); }
+
 static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	NSString *lang = RLTrLang();
 	if (!RLBool(@"tr", NO) || RLInLang(l, lang)) return nil;
-	return l.tr ?: l.mx[lang];
+	return l.mx[lang].count && (RLVibeFirst(lang) || !l.tr.count) ? l.mx[lang] : l.tr;
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLAIType(NSArray<RLLine *> *lines);

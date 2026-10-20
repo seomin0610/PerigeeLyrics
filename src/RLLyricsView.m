@@ -502,6 +502,13 @@ static double RLSmooth(double p) {
 	trLang.showsMenuAsPrimaryAction = YES;
 	trLang.changesSelectionAsPrimaryAction = YES;
 	[self row:RLL(@"Translation Language", @"번역 언어") control:trLang];
+	UISegmentedControl *ko = [[UISegmentedControl alloc] initWithItems:@[ @"VIBE", @"Radiant" ]];
+	ko.selectedSegmentIndex = (NSInteger)RLNum(@"koSource", 0);
+	[ko addAction:[UIAction actionWithHandler:^(UIAction *a) {
+		RLSet(@"koSource", @(((UISegmentedControl *)a.sender).selectedSegmentIndex));
+		RLSettingsChanged(@"koSource");
+	}] forControlEvents:UIControlEventValueChanged];
+	[self row:RLL(@"Korean Translation First", @"한국어 번역 우선") control:ko];
 	[self toggle:@"allowAI" title:RLL(@"AI Features (off skips AI-made lyrics)", @"AI 기능 (끄면 AI가 만든 가사 제외)") def:YES];
 	NSString *ai = RLBool(@"allowAI", YES) ? RLAIType(RLStore.shared.lines) : nil;
 	if (RLBool(@"allowAI", YES)) [self toggle:@"radiantAI" title:RLL(@"Radiant AI (Sylla makes missing lyrics and word-times line lyrics)", @"Radiant AI (Sylla가 없는 가사를 만들고 줄 가사에 단어 싱크를 맞춤)") def:NO];
