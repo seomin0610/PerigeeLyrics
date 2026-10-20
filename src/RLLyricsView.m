@@ -714,7 +714,7 @@ static double RLSmooth(double p) {
 	BOOL _brkOpen;
 	CGSize _builtSize;
 	UIEdgeInsets _insets;
-	CGFloat _tidalAlpha, _nativeSize, _nativeMargin, _anchor, _gap;
+	CGFloat _tidalAlpha, _nativeSize, _nativeMargin, _anchor, _gap, _tidalCS, _tidalOff, _tidalPad;
 	BOOL _measured, _unsynced;
 	BOOL _dragging;
 	double _lastUserScroll;
@@ -936,7 +936,7 @@ static RLLyricsView *gCache;
 		_credit.frame = (CGRect){ CGPointMake(_credit.frame.origin.x, y), _credit.frame.size };
 		y += _credit.frame.size.height + _gap;
 	}
-	_scroll.contentSize = CGSizeMake(_builtSize.width, MAX(_builtSize.height, y + _insets.bottom + 120));
+	_scroll.contentSize = CGSizeMake(_builtSize.width, MAX(_builtSize.height, y + MAX(_insets.bottom + 120, _tidalPad - 40)));
 }
 
 - (void)scrollToFocus:(BOOL)animated bounce:(BOOL)bounce {
@@ -991,7 +991,23 @@ static RLLyricsView *gCache;
 		if (_focus >= 0) _focus = -3;
 	}
 	if (fabs([self anchorY] - _anchor) > 1) [self setNeedsLayout];
+	if (t.contentSize.height != _tidalCS || (!_tidalPad && t.contentOffset.y != _tidalOff)) [self measureTidalPad:t];
 	return YES;
+}
+
+- (void)measureTidalPad:(UIScrollView *)t {
+	_tidalCS = t.contentSize.height;
+	_tidalOff = t.contentOffset.y;
+	NSMutableArray<NSValue *> *rects = [NSMutableArray array];
+	RLTextLayers(t.layer, t.layer, rects, 0);
+	CGFloat bottom = 0;
+	for (NSValue *v in rects) bottom = MAX(bottom, CGRectGetMaxY(v.CGRectValue));
+	CGFloat pad = bottom >= _tidalCS - t.bounds.size.height ? _tidalCS - bottom : 0;
+	if (fabs(pad - _tidalPad) < 1) return;
+	_tidalPad = pad;
+	RLLog(@"tidal pad %.0f (content %.0f)", pad, _tidalCS);
+	if (_focus >= 0) _focus = -3;
+	[self relayout];
 }
 
 - (void)tick {
