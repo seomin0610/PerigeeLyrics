@@ -55,10 +55,14 @@ static void RLCoverResolve(NSUInteger seq) {
 		NSString *url = isrc ? RLCoverLookup([@"isrc=" stringByAppendingString:RLEnc(isrc)], &answered) : nil;
 		if (!url && withAlbum) url = RLCoverLookup(withAlbum, &answered);
 		if (!url) url = RLCoverLookup(q, &answered);
+		// ama's title search has been answering 404 for everything, so a miss without the ISRC isn't kept:
+		// the ISRC arriving late (RLTrackSeen) looks again
 		dispatch_async(dispatch_get_main_queue(), ^{
-			if (answered) [gCovers setObject:url ?: NSNull.null forKey:key];
+			if (answered && (url || isrc)) [gCovers setObject:url ?: NSNull.null forKey:key];
 			RLLog(@"animated cover for %@ (ISRC %@): %@", title, isrc ?: @"unknown", url ? @"found" : answered ? @"none" : @"lookup failed");
-			if (seq == gSeq) gURL = url;
+			if (seq != gSeq) return;
+			gURL = url;
+			gWaiting = !url && !isrc;
 		});
 	});
 }
