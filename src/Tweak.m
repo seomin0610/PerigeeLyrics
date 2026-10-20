@@ -91,6 +91,7 @@ static BOOL RLInvoke(MPRemoteCommand *cmd, MPRemoteCommandEvent *event) {
 
 static __weak RLLyricsView *gLyricsView;
 static RLBackdrop *gBackdrop;
+static NSHashTable<AVPlayer *> *gPlayers;
 static void RLSync(void);
 static void RLSyncBackdrop(void);
 static void RLDumpPlayer(UIView *hv);
@@ -122,6 +123,13 @@ static void RLUntint(void);
 
 - (double)rawNow {
 	double t = _elapsed + MAX(0, CACurrentMediaTime() - MAX(_stamp, _hold)) * _rate;
+	// nowPlayingInfo keeps running while TIDAL loads; its audio player's clock stops. Closest one wins (crossfade = two)
+	double best = NAN;
+	for (AVPlayer *p in gPlayers) {
+		double pt = CMTimeGetSeconds(p.currentTime);
+		if (p.currentItem && !p.muted && !p.currentItem.presentationSize.width && isfinite(pt) && (!isfinite(best) || fabs(pt - t) < fabs(best - t))) best = pt;
+	}
+	if (isfinite(best)) t = best;
 	return _duration > 0 ? MIN(t, _duration) : t;
 }
 
@@ -137,6 +145,7 @@ static void RLUntint(void);
 	NSString *title = info[MPMediaItemPropertyTitle], *artist = info[MPMediaItemPropertyArtist];
 	if (title.length && artist.length && !([title isEqualToString:_title] && [artist isEqualToString:_artist])) {
 		if (!info[MPMediaItemPropertyPlaybackDuration]) _duration = 0;
+		if (!el) _elapsed = 0, _stamp = stamp;
 		self.title = title;
 		self.artist = artist;
 		[self refetch];
@@ -798,6 +807,13 @@ static void hook_shakeState(id self, SEL _cmd, int state) {
 }
 
 __attribute__((constructor)) static void RLInit(void) {
+	gPlayers = [NSHashTable weakObjectsHashTable];
+	[NSNotificationCenter.defaultCenter addObserverForName:AVPlayerRateDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+		AVPlayer *p = n.object;
+		if (![p isKindOfClass:AVPlayer.class] || [gPlayers containsObject:p]) return;
+		[gPlayers addObject:p];
+		RLLog(@"player %@ %p muted %d size %@ at %.1f", p.class, p, p.muted, NSStringFromCGSize(p.currentItem.presentationSize), CMTimeGetSeconds(p.currentTime));
+	}];
 	[NSNotificationCenter.defaultCenter addObserverForName:UIScreenCapturedDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
 		if (RLBool(@"replayOnRecord", NO) && ((UIScreen *)n.object).isCaptured) RLReplay();
 	}];
