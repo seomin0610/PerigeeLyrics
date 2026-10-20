@@ -365,12 +365,29 @@ static NSInteger RLScore(NSArray<RLLine *> *lines, NSString *source) {
 	return (word ? (RLAIType(lines) ? 1 : 2) : 0) * 2 + [source isEqualToString:@"radiant"];
 }
 
+static NSSet<NSString *> *RLGrams(NSArray<RLLine *> *lines) {
+	NSMutableSet *g = [NSMutableSet set];
+	for (RLLine *l in lines)
+		for (NSUInteger i = 0; i + 3 <= l.key.length; i++) [g addObject:[l.key substringWithRange:NSMakeRange(i, 3)]];
+	return g;
+}
+
+// Measured on 9 songs: the same song from two sources shares >= 93% of its trigrams, two different songs <= 39%.
+static BOOL RLSameWords(NSSet *a, NSSet *b) {
+	if (!a.count || !b.count) return YES;
+	NSMutableSet *both = [a mutableCopy];
+	[both intersectSet:b];
+	return both.count >= 0.6 * MIN(a.count, b.count);
+}
+
 @interface RLJob : NSObject
 @property (nonatomic) NSMutableArray *dones;
 @property (nonatomic) NSArray<RLLine *> *lines;
 @property (nonatomic, copy) NSString *source;
 @property (nonatomic) NSData *payload;
 @property (nonatomic) NSInteger score;
+@property (nonatomic) NSMutableArray<RLJob *> *seen;
+@property (nonatomic) NSSet<NSString *> *grams;
 @end
 @implementation RLJob
 @end
@@ -583,14 +600,30 @@ void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration,
 			NSArray *lines = RLParseAs(source, d, romanize);
 			if (!lines) return;
 			dispatch_async(queue, ^{
-				NSInteger score = RLScore(lines, source);
-				if (j.lines && score <= j.score) return;
-				RLLog(@"%@: %lu lines (score %ld)%@", source, (unsigned long)lines.count, (long)score, j.lines ? [@" replacing " stringByAppendingString:j.source] : @"");
-				j.lines = lines;
-				j.source = source;
-				j.payload = d;
-				j.score = score;
-				send(lines);
+				RLJob *c = [RLJob new];
+				c.lines = lines;
+				c.source = source;
+				c.payload = d;
+				c.score = RLScore(lines, source);
+				c.grams = RLGrams(lines);
+				if (!j.seen) j.seen = [NSMutableArray array];
+				[j.seen addObject:c];
+				// sources agreeing outrank better timing: Radiant can answer another song with the same title
+				RLJob *best;
+				NSInteger bestRank = NSIntegerMin, cur = NSIntegerMin, agree = 0;
+				for (RLJob *x in j.seen) {
+					NSInteger n = 0;
+					for (RLJob *y in j.seen) n += y != x && RLSameWords(x.grams, y.grams);
+					if (x.lines == j.lines) cur = n * 10 + x.score;
+					if (n * 10 + x.score > bestRank) bestRank = n * 10 + x.score, best = x, agree = n;
+				}
+				if (j.lines && bestRank <= cur) return;
+				RLLog(@"%@: %lu lines (score %ld, %ld agree)%@", best.source, (unsigned long)best.lines.count, (long)best.score, (long)agree, j.lines ? [@" replacing " stringByAppendingString:j.source] : @"");
+				j.lines = best.lines;
+				j.source = best.source;
+				j.payload = best.payload;
+				j.score = best.score;
+				send(best.lines);
 			});
 		};
 		__block BOOL answered = NO;
