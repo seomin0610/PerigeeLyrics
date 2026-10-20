@@ -19,7 +19,7 @@ static inline void RLSet(NSString *k, id v) { [RLDefaults setObject:v forKey:[@"
 @property (nonatomic, copy) NSArray<RLSyl *> *main, *bg;
 @property (nonatomic, copy) NSArray<RLSyl *> *tr;
 @property (nonatomic) NSMutableDictionary<NSString *, NSArray<RLSyl *> *> *mx;
-@property (nonatomic, copy) NSString *key;
+@property (nonatomic, copy) NSString *key, *lang;
 @property (nonatomic) BOOL right;
 @end
 
@@ -31,6 +31,7 @@ NSString *RLEnc(NSString *s);
 NSString *RLLineKey(NSString *s);
 NSArray<RLSyl *> *RLWords(NSString *text, double t);
 void RLTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NSString *lang, void (^done)(BOOL found));
+BOOL RLInLang(RLLine *l, NSString *lang);
 
 #define kRLTrLangs (@[ @"ko", @"en", @"ja", @"zh", @"es", @"fr", @"de", @"pt", @"it", @"ru", @"vi", @"th", @"id", @"tr", @"tl", @"nl", @"pl", @"ar", @"hi" ])
 
@@ -40,8 +41,9 @@ static inline NSString *RLTrLang(void) {
 }
 
 static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
-	if (!RLBool(@"tr", NO)) return nil;
-	return l.tr ?: l.mx[RLTrLang()];
+	NSString *lang = RLTrLang();
+	if (!RLBool(@"tr", NO) || RLInLang(l, lang)) return nil;
+	return l.tr ?: l.mx[lang];
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLAIType(NSArray<RLLine *> *lines);

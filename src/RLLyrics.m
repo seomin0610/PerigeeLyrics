@@ -2,6 +2,7 @@
 #import <os/log.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <objc/runtime.h>
+#import <NaturalLanguage/NaturalLanguage.h>
 
 @implementation RLSyl
 @end
@@ -71,6 +72,17 @@ NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString
 	if (total && llround(right * 100.0 / total) >= 85)
 		for (NSUInteger i = 0; i < sides.count; i++) sides[i] = @(![sides[i] boolValue]);
 	return sides;
+}
+
+// rl-api also "translates" a line already in the target language (Korean into reworded Korean), so such a
+// line gets none. Mixed lines count as the language NaturalLanguage finds most of.
+BOOL RLInLang(RLLine *l, NSString *lang) {
+	if (!l.lang) {
+		NLLanguageRecognizer *r = [NLLanguageRecognizer new];
+		[r processString:[[l.main valueForKey:@"text"] componentsJoinedByString:@""]];
+		l.lang = r.dominantLanguage ?: @"";
+	}
+	return [l.lang hasPrefix:lang];
 }
 
 NSString *RLLineKey(NSString *s) {
