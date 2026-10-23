@@ -280,6 +280,7 @@ static CGFloat RLRowWidth(NSArray<NSArray<RLSlot *> *> *row) {
 - (void)update:(double)t glow:(CGFloat)glow style:(NSInteger)style;
 - (void)setDrawn:(BOOL)drawn;
 - (void)setBlurEm:(CGFloat)em;
+- (BOOL)refreshTr;
 @end
 
 static UIViewPropertyAnimator *RLEase(NSTimeInterval d, void (^animations)(void)) {
@@ -292,6 +293,7 @@ static UIViewPropertyAnimator *RLEase(NSTimeInterval d, void (^animations)(void)
 @implementation RLLineView {
 	RLBlock *_main, *_bgBlock, *_trBlock;
 	UIView *_bgBox, *_trBox;
+	NSArray<RLSyl *> *_tr;
 	CGFloat _bgH, _trH, _trPad, _size, _blur;
 }
 
@@ -310,23 +312,49 @@ static UIViewPropertyAnimator *RLEase(NSTimeInterval d, void (^animations)(void)
 			[self addSubview:_bgBox];
 			_bgH = pad + _bgBlock.height;
 		}
-		NSArray<RLSyl *> *tr = RLTrFor(line);
-		if (tr.count) {
-			CGFloat trSize = size * 0.6;
-			_trPad = round(trSize * 0.3);
-			_trBox = [[UIView alloc] init];
-			_trBox.userInteractionEnabled = NO;
-			_trBlock = [[RLBlock alloc] initWithSyls:tr font:RLFont(@"SquareSansText-SemiBold", trSize, UIFontWeightSemibold) width:width right:line.right in:_trBox y:0];
-			_trBox.frame = CGRectMake(0, _main.height + _trPad, width, _trBlock.height);
-			[self addSubview:_trBox];
-			_trH = _trPad + _trBlock.height;
-		}
+		_tr = RLTrFor(line);
+		if (_tr.count) [self addTr:width];
 		self.layer.anchorPoint = CGPointMake(line.right ? 1 : 0, 0.5);
 		self.bounds = CGRectMake(0, 0, width, _main.height + _trH);
 		self.alpha = 0.7;
 		self.transform = CGAffineTransformMakeScale(0.96, 0.96);
 	}
 	return self;
+}
+
+- (void)addTr:(CGFloat)width {
+	CGFloat trSize = _size * 0.6;
+	_trPad = round(trSize * 0.3);
+	_trBox = [[UIView alloc] init];
+	_trBox.userInteractionEnabled = NO;
+	_trBlock = [[RLBlock alloc] initWithSyls:_tr font:RLFont(@"SquareSansText-SemiBold", trSize, UIFontWeightSemibold) width:width right:_line.right in:_trBox y:0];
+	_trBox.frame = CGRectMake(0, _main.height + (_active ? _bgH : 0) + _trPad, width, _trBlock.height);
+	[self addSubview:_trBox];
+	_trH = _trPad + _trBlock.height;
+}
+
+// A translation that lands later slides down out of its line instead of every line being rebuilt
+- (BOOL)refreshTr {
+	NSArray<RLSyl *> *tr = RLTrFor(_line);
+	if (tr == _tr || (!tr.count && !_tr.count)) return NO;
+	_tr = tr;
+	UIView *old = _trBox;
+	if (old) [RLEase(0.3, ^{ old.alpha = 0; }) addCompletion:^(UIViewAnimatingPosition p) { [old removeFromSuperview]; }];
+	_trBox = nil;
+	_trBlock = nil;
+	_trH = 0;
+	if (!tr.count) return YES;
+	[self addTr:self.bounds.size.width];
+	[_trBlock setBlur:_blur];
+	UIView *box = _trBox;
+	CGRect to = box.frame;
+	box.frame = CGRectOffset(to, 0, -_trPad - round(to.size.height * 0.6));
+	box.alpha = 0;
+	RLEase(0.5, ^{
+		box.frame = to;
+		box.alpha = 1;
+	});
+	return YES;
 }
 
 - (void)update:(double)t glow:(CGFloat)glow style:(NSInteger)style {
@@ -909,6 +937,16 @@ static RLLyricsView *gCache;
 	}
 	[self relayout];
 	[self tick];
+}
+
+- (void)retranslate {
+	BOOL changed = NO;
+	for (RLLineView *lv in _lineViews) changed |= [lv refreshTr];
+	if (!changed) return;
+	RLEase(0.5, ^{
+		[self relayout];
+		if (self->_focus >= 0 && !self->_dragging && self->_lastUserScroll == 0) [self scrollToFocus:NO bounce:NO];
+	});
 }
 
 - (void)restart {

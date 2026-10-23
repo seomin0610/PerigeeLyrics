@@ -203,10 +203,10 @@ static void RLUntint(void);
 	BOOL had = RLHasTr(lines, lang);
 	RLRadiantTranslate(lines, title, artist, lang, ^(BOOL found) {
 		if (lines != self.lines) return;
-		if (found && !had) [gLyricsView rebuild];
+		if (found && !had) [gLyricsView retranslate];
 		if ((found && !RLVibeFirst(lang)) || lines.firstObject.mx[lang]) return;
 		RLTranslate(lines, title, artist, lang, ^(BOOL found) {
-			if (found && lines == self.lines) [gLyricsView rebuild];
+			if (found && lines == self.lines) [gLyricsView retranslate];
 		});
 	});
 }
@@ -335,7 +335,7 @@ void RLSettingsChanged(NSString *key) {
 	if ([key isEqualToString:@"romanize"] || [key isEqualToString:@"allowAI"] || [key isEqualToString:@"radiantAI"]) [RLStore.shared refresh];
 	else if ([key isEqualToString:@"spicyKey"]) [RLStore.shared refetch:YES];
 	else if ([key isEqualToString:@"fontScale"]) [gLyricsView rebuild];
-	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"] || [key isEqualToString:@"koSource"]) { [gLyricsView rebuild]; [RLStore.shared translate]; }
+	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"] || [key isEqualToString:@"koSource"]) { [gLyricsView retranslate]; [RLStore.shared translate]; }
 	else if ([key isEqualToString:@"enabled"]) RLSync();
 	else if ([key isEqualToString:@"backdrop"]) RLSyncBackdrop();
 	else if ([key isEqualToString:@"animCover"]) { RLCoverSetting(); RLSyncBackdrop(); }

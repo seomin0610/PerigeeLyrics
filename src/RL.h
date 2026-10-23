@@ -98,6 +98,7 @@ void RLCoverSetting(void);
 - (void)detach;
 - (void)reload;
 - (void)rebuild;
+- (void)retranslate;
 - (void)restart;
 @end
 
