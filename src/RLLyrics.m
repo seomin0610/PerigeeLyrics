@@ -75,11 +75,21 @@ NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString
 }
 
 // rl-api also "translates" a line already in the target language (Korean into reworded Korean), so such a
-// line gets none. Mixed lines count as the language NaturalLanguage finds most of.
+// line gets none. NaturalLanguage counts characters, so "Ling, ling 결국 알게 될 거야" came out English; a
+// Hangul/kana/Han character weighs two letters and only the heavier side of a mixed line is recognized.
 BOOL RLInLang(RLLine *l, NSString *lang) {
 	if (!l.lang) {
+		NSString *s = [[l.main valueForKey:@"text"] componentsJoinedByString:@""];
+		NSMutableString *wide = [NSMutableString string], *rest = [NSMutableString string];
+		NSUInteger letters = 0;
+		for (NSUInteger i = 0; i < s.length; i++) {
+			unichar c = [s characterAtIndex:i];
+			BOOL cjk = (c >= 0x1100 && c <= 0x11FF) || (c >= 0x3040 && c <= 0x30FF) || (c >= 0x3130 && c <= 0x318F) || (c >= 0x3400 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7A3);
+			if (!cjk && [NSCharacterSet.letterCharacterSet characterIsMember:c]) letters++;
+			[cjk ? wide : rest appendFormat:@"%C", c];
+		}
 		NLLanguageRecognizer *r = [NLLanguageRecognizer new];
-		[r processString:[[l.main valueForKey:@"text"] componentsJoinedByString:@""]];
+		[r processString:wide.length * 2 > letters ? wide : rest];
 		l.lang = r.dominantLanguage ?: @"";
 	}
 	return [l.lang hasPrefix:lang];
