@@ -95,7 +95,7 @@ static NSDictionary *RLLyricsObject(NSArray<RLLine *> *lines, NSString *trackId)
 		@"lrcText": [lrc componentsJoinedByString:@"\n"],
 		@"direction": @"LEFT_TO_RIGHT",
 		@"technicalStatus": @"OK",
-		@"provider": @{ @"source": @"THIRD_PARTY", @"name": RLCredit(lines).string ?: RLSourceName(lines) ?: @"Radiant Lyrics", @"commonTrackId": trackId, @"lyricsId": lid },
+		@"provider": @{ @"source": @"THIRD_PARTY", @"name": RLCredit(lines).string ?: RLSourceName(lines) ?: @"Perigee Lyrics", @"commonTrackId": trackId, @"lyricsId": lid },
 	} };
 }
 
@@ -125,7 +125,7 @@ static NSURLSessionDataTask *hook_dataTask(NSURLSession *self, SEL _cmd, NSURLRe
 		if (err || RLTidalHasLyrics(data, resp)) {
 			RLLog(@"TIDAL lyrics for %@: %@", trackId, err ? err.localizedDescription : @"present");
 			done(data, resp, err);
-			if (!err && (RLBool(@"animCover", YES) || RLBool(@"allowAI", YES))) RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) { RLTrackSeen(title, isrc, duration, trackId); });
+			if (!err && RLBool(@"animCover", YES)) RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) { RLTrackSeen(title, isrc, duration, trackId); });
 			return;
 		}
 		RLTrackInfo(self, req, trackId, ^(NSString *title, NSString *artist, NSString *isrc, double duration) {

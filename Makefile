@@ -3,11 +3,11 @@ ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = RadiantTidal
-RadiantTidal_FILES = $(wildcard src/*.m)
-RadiantTidal_CFLAGS = -fobjc-arc -Wall
-RadiantTidal_LDFLAGS = -Wl,-current_version,1.0.0
-RadiantTidal_FRAMEWORKS = UIKit MediaPlayer QuartzCore CoreGraphics CoreText Metal AVFoundation CoreMedia NaturalLanguage
-RadiantTidal_USE_MODULES = 0
+TWEAK_NAME = PerigeeLyrics
+PerigeeLyrics_FILES = $(wildcard src/*.m)
+PerigeeLyrics_CFLAGS = -fobjc-arc -Wall
+PerigeeLyrics_LDFLAGS = -Wl,-current_version,1.0.0
+PerigeeLyrics_FRAMEWORKS = UIKit MediaPlayer QuartzCore CoreGraphics CoreText Metal AVFoundation CoreMedia NaturalLanguage
+PerigeeLyrics_USE_MODULES = 0
 
 include $(THEOS_MAKE_PATH)/tweak.mk

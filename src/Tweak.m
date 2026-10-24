@@ -182,32 +182,18 @@ static void RLUntint(void);
 - (void)show:(NSArray<RLLine *> *)lines {
 	self.lines = lines;
 	self.status = lines ? RLStatusOK : RLStatusMissing;
-	RLLog(@"%lu lines for %@ — %@ (%@%@)", (unsigned long)lines.count, self.title, self.artist, RLSourceName(lines), RLAIType(lines) ? [@", Sylla " stringByAppendingString:RLAIType(lines)] : @"");
+	RLLog(@"%lu lines for %@ — %@ (%@)", (unsigned long)lines.count, self.title, self.artist, RLSourceName(lines));
 	[gLyricsView reload];
 	RLSync();
 	[self translate];
 }
 
-- (void)retime {
-	if (!_title) return;
-	NSUInteger fid = _fetchId;
-	RLRetime(_title, _artist, _duration, self.lines, ^(NSArray<RLLine *> *lines) {
-		if (lines && fid == self->_fetchId) [self show:lines];
-	});
-}
-
 - (void)translate {
 	NSArray<RLLine *> *lines = self.lines;
-	NSString *lang = RLTrLang(), *title = _title, *artist = _artist;
-	if (!RLBool(@"tr", NO) || !lines.count) return;
-	BOOL had = RLHasTr(lines, lang);
-	RLRadiantTranslate(lines, title, artist, lang, ^(BOOL found) {
-		if (lines != self.lines) return;
-		if (found && !had) [gLyricsView retranslate];
-		if ((found && !RLVibeFirst(lang)) || lines.firstObject.mx[lang]) return;
-		RLTranslate(lines, title, artist, lang, ^(BOOL found) {
-			if (found && lines == self.lines) [gLyricsView retranslate];
-		});
+	NSString *lang = RLTrLang();
+	if (!RLBool(@"tr", NO) || !lines.count || lines.firstObject.mx[lang]) return;
+	RLTranslate(lines, _title, _artist, lang, ^(BOOL found) {
+		if (found && lines == self.lines) [gLyricsView retranslate];
 	});
 }
 
@@ -332,17 +318,17 @@ void RLReplay(void) {
 }
 
 void RLSettingsChanged(NSString *key) {
-	if ([key isEqualToString:@"romanize"] || [key isEqualToString:@"allowAI"] || [key isEqualToString:@"radiantAI"]) [RLStore.shared refresh];
+	if ([key isEqualToString:@"romanize"]) [RLStore.shared refresh];
 	else if ([key isEqualToString:@"spicyKey"]) [RLStore.shared refetch:YES];
 	else if ([key isEqualToString:@"fontScale"]) [gLyricsView rebuild];
-	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"] || [key isEqualToString:@"koSource"]) { [gLyricsView retranslate]; [RLStore.shared translate]; }
+	else if ([key isEqualToString:@"tr"] || [key isEqualToString:@"trLang"]) { [gLyricsView retranslate]; [RLStore.shared translate]; }
 	else if ([key isEqualToString:@"enabled"]) RLSync();
 	else if ([key isEqualToString:@"backdrop"]) RLSyncBackdrop();
 	else if ([key isEqualToString:@"animCover"]) { RLCoverSetting(); RLSyncBackdrop(); }
 	else if ([key isEqualToString:@"fadeTint"]) { RLUntint(); RLSyncBackdrop(); }
 	else if ([key isEqualToString:@"lang"]) {
 		UIButtonConfiguration *c = gSettingsButton.configuration;
-		c.title = RLL(@"Radiant Lyrics Settings", @"Radiant 가사 설정");
+		c.title = RLL(@"Perigee Lyrics Settings", @"Perigee 가사 설정");
 		gSettingsButton.configuration = c;
 	}
 }
@@ -363,7 +349,7 @@ static UIView *RLSettingsFooter(UITableView *table, UIView *old) {
 	UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, rowH + old.bounds.size.height)];
 	footer.accessibilityIdentifier = @"rl.settings";
 	UIButtonConfiguration *c = [UIButtonConfiguration tintedButtonConfiguration];
-	c.title = RLL(@"Radiant Lyrics Settings", @"Radiant 가사 설정");
+	c.title = RLL(@"Perigee Lyrics Settings", @"Perigee 가사 설정");
 	c.image = [UIImage systemImageNamed:@"music.note.list"];
 	c.imagePadding = 8;
 	__weak UITableView *weakTable = table;

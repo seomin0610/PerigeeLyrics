@@ -190,8 +190,7 @@ void RLTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NS
 		NSMutableArray *found = [NSMutableArray array];
 		for (NSUInteger i = 0; i < lines.count; i++) [found addObject:NSNull.null];
 		BOOL any = NO;
-		// with rl-api's translations already there, VIBE only replaces them (RLVibeFirst)
-		NSArray *sources = [lang isEqualToString:@"ko"] ? (RLHasTr(lines, lang) ? @[ @"vibe" ] : @[ @"vibe", @"musixmatch" ]) : [lang isEqualToString:@"zh"] ? @[ @"netease", @"musixmatch" ] : @[ @"musixmatch" ];
+		NSArray *sources = [lang isEqualToString:@"ko"] ? @[ @"vibe", @"musixmatch" ] : [lang isEqualToString:@"zh"] ? @[ @"netease", @"musixmatch" ] : @[ @"musixmatch" ];
 		for (NSString *source in sources) {
 			if (![found containsObject:NSNull.null]) break;
 			NSString *key = [NSString stringWithFormat:@"%@\n%@\n%@\n%@", source, title, artist, lang];

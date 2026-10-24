@@ -1,6 +1,8 @@
-# RadiantTidal
+# Perigee Lyrics
 
-Radiant Lyrics for iOS Tidal (WIP)
+Lyrics for TIDAL on iOS, part of [Perigee](https://github.com/seomin0610/Perigee).
+
+Based on [Radiant Lyrics](https://radiant-lyrics.org) by meowarex. This is a modified version, not an official Radiant Lyrics build: ported to iOS from rl-mobile and radiant-lyrics-luna by seomin0610 since 2026-09-27, without the Radiant Lyrics API or Sylla AI. Don't contact the Radiant Lyrics team for support.
 
 ## Upstream
 

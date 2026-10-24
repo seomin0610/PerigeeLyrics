@@ -25,7 +25,6 @@ static inline void RLSet(NSString *k, id v) { [RLDefaults setObject:v forKey:[@"
 
 typedef NS_ENUM(NSInteger, RLStatus) { RLStatusIdle, RLStatusLoading, RLStatusOK, RLStatusMissing };
 
-NSArray<RLLine *> *RLParse(NSDictionary *json, BOOL romanize);
 NSInteger RLGet(NSString *url, NSDictionary *headers, NSTimeInterval timeout, NSData **out);
 NSString *RLEnc(NSString *s);
 NSString *RLLineKey(NSString *s);
@@ -40,21 +39,14 @@ static inline NSString *RLTrLang(void) {
 	return [kRLTrLangs containsObject:l] ? l : @"en";
 }
 
-// Korean: VIBE's own translations (rl.koSource 0, default) or rl-api's word-timed machine ones first
-static inline BOOL RLVibeFirst(NSString *lang) { return [lang isEqualToString:@"ko"] && !RLNum(@"koSource", 0); }
-
 static inline NSArray<RLSyl *> *RLTrFor(RLLine *l) {
 	NSString *lang = RLTrLang();
 	if (!RLBool(@"tr", NO) || RLInLang(l, lang)) return nil;
-	// rl-api's (or a TTML source's English) translation vs. VIBE/Musixmatch/NetEase's
-	NSArray *api = l.mx[[@"rl." stringByAppendingString:lang]] ?: ([lang isEqualToString:@"en"] ? l.tr : nil), *own = l.mx[lang];
-	return own.count && (RLVibeFirst(lang) || !api.count) ? own : api;
+	// a TTML source's English translation vs. VIBE/Musixmatch/NetEase's
+	NSArray *api = [lang isEqualToString:@"en"] ? l.tr : nil, *own = l.mx[lang];
+	return own.count && !api.count ? own : api;
 }
 void RLFetch(NSString *title, NSString *artist, NSString *isrc, double duration, BOOL flush, void (^done)(NSArray<RLLine *> *lines));
-NSString *RLAIType(NSArray<RLLine *> *lines);
-BOOL RLHasTr(NSArray<RLLine *> *lines, NSString *lang);
-void RLRadiantTranslate(NSArray<RLLine *> *lines, NSString *title, NSString *artist, NSString *lang, void (^done)(BOOL found));
-void RLRetime(NSString *title, NSString *artist, double duration, NSArray<RLLine *> *lines, void (^done)(NSArray<RLLine *> *lines));
 NSString *RLSourceName(NSArray<RLLine *> *lines);
 NSAttributedString *RLCredit(NSArray<RLLine *> *lines);
 NSArray<NSNumber *> *RLSides(NSArray *singers, NSDictionary<NSString *, NSString *> *types);
@@ -73,7 +65,6 @@ NSArray<RLLine *> *RLParseMxm(NSData *d);
 NSArray<RLLine *> *RLParseSpicy(NSData *d, BOOL romanize, NSAttributedString **credit);
 void RLCoverTrack(NSString *title, NSString *artist, NSString *album, double duration);
 void RLTrackSeen(NSString *title, NSString *isrc, double duration, NSString *trackId);
-NSArray<NSString *> *RLTrackRef(NSString *title, double duration);
 void RLCoverSync(UIView *player);
 void RLCoverSetting(void);
 
@@ -87,7 +78,6 @@ void RLCoverSetting(void);
 - (void)refetch;
 - (void)refetch:(BOOL)flush;
 - (void)refresh;
-- (void)retime;
 - (void)translate;
 - (void)seek:(double)t;
 @end

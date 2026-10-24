@@ -30,11 +30,6 @@ static NSArray *RLSeen(NSString *title, double duration) {
 
 static NSString *RLCoverISRCFor(NSString *title, double duration) { return RLSeen(title, duration)[1]; }
 
-NSArray<NSString *> *RLTrackRef(NSString *title, double duration) {
-	NSArray *e = RLSeen(title, duration);
-	return [e[3] length] ? @[ e[1], e[3] ] : nil;
-}
-
 static NSString *RLCoverLookup(NSString *query, BOOL *answered) {
 	NSData *d;
 	NSInteger st = RLGet([@"https://ama.trainswift.net/api/v1/artwork/search?" stringByAppendingString:query], nil, 10, &d);
